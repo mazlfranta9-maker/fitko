@@ -71,14 +71,16 @@ it("SQL migrace, transakční série, RLS a právě jeden posun sdíleného kola
       .n,
   ).toBe(48);
   await db.exec(
-    "grant usage on schema public,auth to authenticated; grant select,insert,update,delete on all tables in schema public to authenticated; set role authenticated;",
+    "grant usage on schema auth to authenticated; set role authenticated;",
   );
+  expect((await db.query("select * from profiles")).rows).toHaveLength(2);
+  expect((await db.query("select * from workouts")).rows).toHaveLength(2);
   await expect(
     db.query(
       "update workouts set completed=false where user_id=$1 returning id",
       [h],
     ),
-  ).resolves.toMatchObject({ rows: [] });
+  ).rejects.toThrow("permission denied for table workouts");
   await db.query("select set_config('test.uid','',false)");
   expect((await db.query("select * from workouts")).rows).toHaveLength(0);
   await db.close();
