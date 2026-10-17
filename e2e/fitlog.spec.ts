@@ -32,9 +32,8 @@ test("mobilní zápis, obnovení, dokončení a sdílený cyklus", async ({
   await page
     .getByRole("button", { name: "Dokončit trénink", exact: true })
     .click();
-  await expect(page.locator(".day-display strong")).toContainText("02");
-  await page.getByRole("button", { name: "D David" }).click();
   await expect(page.locator(".day-display strong")).toContainText("01");
+  await expect(page.locator(".editing-banner strong")).toHaveText("David");
   for (let i = 0; i < 24; i++) {
     await weights.nth(i).fill("15");
     await reps.nth(i).fill("9");
@@ -99,4 +98,38 @@ test("nabídka je nahoře i při posunu a správa připraví propojení Davida",
   await expect(page.getByLabel("SQL pro propojení Davida")).toHaveValue(
     /INSERT INTO public.profiles/,
   );
+});
+
+test("střídání po sériích zachová společný den, cvik a samostatné výsledky", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const weights = page.locator("input[inputmode=decimal]"),
+    reps = page.locator("input[inputmode=numeric]");
+  await weights.nth(0).fill("12,5");
+  await reps.nth(0).fill("10");
+  await page
+    .getByRole("button", {
+      name: "Zapsat sérii 1 cviku 1 a předat Davidovi",
+      exact: true,
+    })
+    .click();
+  await expect(page.locator(".editing-banner strong")).toHaveText("David");
+  await expect(weights.nth(0)).toHaveValue("");
+  await weights.nth(0).fill("20");
+  await reps.nth(0).fill("8");
+  await page
+    .getByRole("button", {
+      name: "Zapsat sérii 1 cviku 1 a předat Honzovi",
+      exact: true,
+    })
+    .click();
+  await expect(page.locator(".editing-banner strong")).toHaveText("Honza");
+  await expect(weights.nth(0)).toHaveValue("12,5");
+  await expect(page.locator("#set-0-1")).toHaveClass(/active-set/);
+  await page.reload();
+  await expect(weights.nth(0)).toHaveValue("12,5");
+  await page.getByRole("button", { name: "D David" }).click();
+  await expect(weights.nth(0)).toHaveValue("20");
+  await expect(page.locator(".day-display strong")).toContainText("01");
 });

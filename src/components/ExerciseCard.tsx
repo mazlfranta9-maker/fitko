@@ -2,6 +2,9 @@ import { Check, Dumbbell } from "lucide-react";
 import { type Exercise, type SetEntry, validSets } from "../domain";
 type Entry = { exerciseId: string; sets: SetEntry[] };
 type Props = {
+  person: import("../domain").Person;
+  activeSet?: number;
+  onPass: (series: number) => void;
   entry: Entry;
   index: number;
   muscle: string;
@@ -13,6 +16,9 @@ type Props = {
 export function ExerciseCard({
   entry,
   index,
+  person,
+  activeSet,
+  onPass,
   muscle,
   exercises,
   previous,
@@ -82,7 +88,11 @@ export function ExerciseCard({
           </span>
         </div>
         {entry.sets.map((s, i) => (
-          <div className="set-row" key={i}>
+          <div
+            className={"set-row " + (activeSet === i ? "active-set" : "")}
+            id={`set-${index}-${i}`}
+            key={i}
+          >
             <span className="set-number">
               {i + 1}
               <small>PRACOVNÍ</small>
@@ -102,12 +112,28 @@ export function ExerciseCard({
               value={s.reps}
               disabled={disabled}
               onChange={(e) => changeSet(i, "reps", e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  onPass(i);
+                }
+              }}
             />
             <span className="previous">
               {previous
                 ? `${previous.sets[i].weight} × ${previous.sets[i].reps}`
                 : "—"}
             </span>
+            {!disabled && (
+              <button
+                className="pass-turn"
+                onClick={() => onPass(i)}
+                aria-label={`Zapsat sérii ${i + 1} cviku ${index + 1} a předat ${person === "Honza" ? "Davidovi" : "Honzovi"}`}
+              >
+                ✓ Zapsat sérii {i + 1} ·{" "}
+                {person === "Honza" ? "David" : "Honza"} →
+              </button>
+            )}
           </div>
         ))}
       </div>

@@ -1,0 +1,90 @@
+import { test, expect } from "@playwright/test";
+import { seedExercises } from "../src/domain";
+test("online zapojení fronty odesílá série obou profilů a obnoví offline zápis", async ({
+  page,
+  context,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  // Řízený transport ověřuje UI bez skutečných uživatelských hesel.
+  // SQL transakce a oprávnění samostatně ověřuje live-database.test.ts.
+  await page.route(/\/src\/storage\.ts(?:\?.*)?$/, (route) =>
+    route.fulfill({
+      contentType: "application/javascript",
+      body: `
+ const clone=x=>structuredClone(x);const records=[];window.fitlogTestWrites=[];
+ export const supabase={auth:{getSession:async()=>({data:{session:{user:{id:'honza-account'}}}}),getUser:async()=>({data:{user:{id:'honza-account'}}}),onAuthStateChange:()=>({data:{subscription:{unsubscribe(){}}}}),signOut:async()=>({}),signInWithPassword:async()=>({error:null})}};
+ export function read(key,fallback){return JSON.parse(localStorage.getItem(key)||'null')??fallback;}
+ export function persist(key,value){localStorage.setItem(key,JSON.stringify(value));}
+ export async function loadRemote(){return {profiles:[{id:'honza-account',name:'Honza'},{id:'david-account',name:'David'}],exercises:${JSON.stringify(seedExercises)},workouts:clone(records),cycle:{day:1,round_id:'shared-online-round'}};}
+ export async function savePatch(job){if(!navigator.onLine)throw Error('Offline');window.fitlogTestWrites.push(clone(job));let w=records.find(w=>w.user===job.workout.user&&w.round===job.workout.round);if(!w){w=clone(job.workout);records.push(w);}for(const c of job.changes)w.entries[c.position].sets[c.ordinal-1]={weight:c.weight,reps:c.reps};return w.id;}
+ export async function saveRemote(){} export async function finishRemote(){} export async function saveExercise(e){return e;}
+ `,
+    }),
+  );
+  await page.goto("/");
+  await expect(page.locator(".editing-banner strong")).toHaveText("Honza");
+  const weights = page.locator("input[inputmode=decimal]"),
+    reps = page.locator("input[inputmode=numeric]");
+  await weights.nth(0).fill("12,5");
+  await reps.nth(0).fill("10");
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        JSON.parse(localStorage.getItem("fitlog-online-outbox") || "{}"),
+      ),
+    )
+    .toEqual({});
+  await expect
+    .poll(() => page.evaluate(() => (window as any).fitlogTestWrites.length))
+    .toBeGreaterThan(0);
+  await page
+    .getByRole("button", {
+      name: "Zapsat sérii 1 cviku 1 a předat Davidovi",
+      exact: true,
+    })
+    .click();
+  await expect(page.locator(".editing-banner strong")).toHaveText("David");
+  await weights.nth(0).fill("20");
+  await reps.nth(0).fill("8");
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (window as any).fitlogTestWrites.some(
+          (j: any) => j.workout.user === "David",
+        ),
+      ),
+    )
+    .toBe(true);
+  await page
+    .getByRole("button", {
+      name: "Zapsat sérii 1 cviku 1 a předat Honzovi",
+      exact: true,
+    })
+    .click();
+  await expect(weights.nth(0)).toHaveValue("12,5");
+  await context.setOffline(true);
+  await weights.nth(1).fill("15");
+  await reps.nth(1).fill("9");
+  await expect(page.locator(".sync-status")).toContainText("telefonu");
+  await context.setOffline(false);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (window as any).fitlogTestWrites.some((j: any) =>
+          j.changes.some(
+            (c: any) => c.ordinal === 2 && c.weight === "15" && c.reps === "9",
+          ),
+        ),
+      ),
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        JSON.parse(localStorage.getItem("fitlog-online-outbox") || "{}"),
+      ),
+    )
+    .toEqual({});
+  expect(errors).toEqual([]);
+});

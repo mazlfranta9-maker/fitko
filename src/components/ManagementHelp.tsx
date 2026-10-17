@@ -45,6 +45,30 @@ export function ManagementHelp({
           GitHub — kód aplikace a návod
         </a>
       </div>
+      <details>
+        <summary>Aktualizace databáze pro průběžné série</summary>
+        <p>
+          Pokud průběžné ukládání hlásí chybějící funkci, spusťte v SQL editoru
+          celý soubor 004. Soubor 004 obsahuje také předchozí opravy 002 a 003.
+          Původní soubor 001 znovu nespouštějte.
+        </p>
+        <div className="management-links">
+          <a
+            href="https://github.com/mazlfranta9-maker/fitko/blob/main/supabase/003_shared_editing.sql"
+            target="_blank"
+            rel="noreferrer"
+          >
+            003 — vzájemné zapisování
+          </a>
+          <a
+            href="https://github.com/mazlfranta9-maker/fitko/blob/main/supabase/004_live_sets.sql"
+            target="_blank"
+            rel="noreferrer"
+          >
+            004 — průběžné ukládání sérií
+          </a>
+        </div>
+      </details>
       <h3>Přístup pro Davida</h3>
       <p>
         {availablePeople.includes("David")

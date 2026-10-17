@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Dumbbell,
@@ -30,6 +30,7 @@ import {
   nextDay,
   selected,
   arrangeEntries,
+  nextTurn,
   validSets,
   volume,
   kg,
@@ -43,8 +44,10 @@ import {
   saveRemote,
   finishRemote,
   saveExercise,
+  savePatch,
 } from "./storage";
 import "./style.css";
+import { AutosaveQueue, changedSets, type PendingSave } from "./autosave";
 import { ManagementHelp } from "./components/ManagementHelp";
 import { ExerciseCard } from "./components/ExerciseCard";
 const uid = (): string => crypto.randomUUID();
@@ -53,12 +56,14 @@ const fmt = (n: number) =>
 function App() {
   const prefix = supabase ? "fitlog-online-" : "fitlog-demo-";
   const [tab, setTab] = useState("Trénink"),
-    [person, setPerson] = useState<Person>("Honza"),
+    [person, setPerson] = useState<Person>(() =>
+      read(prefix + "selected-person", "Honza"),
+    ),
     [owner, setOwner] = useState<Person>("Honza"),
     [auth, setAuth] = useState(false),
     [ready, setReady] = useState(!supabase);
   const [availablePeople, setAvailablePeople] = useState<Person[]>(
-    supabase ? [] : ["Honza", "David"],
+    supabase ? read<Person[]>(prefix + "people", []) : ["Honza", "David"],
   );
   const [sharedCycle, setSharedCycle] = useState(() =>
     read(prefix + "cycle", { day: 1, round: uid() }),
@@ -81,6 +86,115 @@ function App() {
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false),
     [online, setOnline] = useState(navigator.onLine);
+  const [activeSet, setActiveSet] = useState(() =>
+    read(prefix + "active-set", { exercise: 0, series: 0 }),
+  );
+  const [syncStatus, setSyncStatus] = useState("");
+  const previousRound = useRef(cycle.round);
+  useEffect(() => {
+    if (previousRound.current !== cycle.round) {
+      previousRound.current = cycle.round;
+      setActiveSet({ exercise: 0, series: 0 });
+    }
+  }, [cycle.round]);
+  const canSync = useRef(false);
+  canSync.current = !!supabase && auth && ready && online;
+  const queue = useRef<AutosaveQueue | null>(null);
+  if (!queue.current)
+    queue.current = new AutosaveQueue(
+      async (job) => {
+        if (!canSync.current) throw Error("Čeká na připojení.");
+        await savePatch(job);
+        const fresh = await loadRemote();
+        setWorkouts(fresh.workouts);
+        setDrafts((ds) => {
+          const next = ds.filter(
+            (d) =>
+              !(
+                d.user === job.workout.user &&
+                d.round === job.workout.round &&
+                JSON.stringify(d) === JSON.stringify(job.workout)
+              ),
+          );
+          persist(prefix + "drafts", next);
+          return next;
+        });
+      },
+      (jobs) => persist(prefix + "outbox", jobs),
+      (status, error) => {
+        setSyncStatus(
+          status === "waiting"
+            ? "Čeká na odeslání…"
+            : status === "saving"
+              ? "Ukládám online…"
+              : status === "saved"
+                ? "Uloženo online"
+                : "Uloženo v telefonu · čeká na odeslání",
+        );
+        if (status === "error") setSynced(false);
+        else if (status === "saved") setSynced(true);
+        if (error && navigator.onLine && canSync.current)
+          setMessage(
+            "Průběžné uložení selhalo: " +
+              ((error as { code?: string }).code === "PGRST202" ||
+              String((error as { message?: string }).message).includes(
+                "save_workout_patch",
+              )
+                ? "V Supabase ještě chybí aktualizace 004 pro průběžné série. Zápis zůstává v telefonu."
+                : (error as { message?: string }).message || "Neznámá chyba"),
+          );
+      },
+      read<Record<string, PendingSave>>(prefix + "outbox", {}),
+    );
+  useEffect(() => {
+    if (supabase && auth && ready && online) void queue.current!.flush();
+  }, [auth, ready, online]);
+  useEffect(() => {
+    const flush = () => {
+      if (document.visibilityState === "hidden") void queue.current!.flush();
+    };
+    document.addEventListener("visibilitychange", flush);
+    return () => document.removeEventListener("visibilitychange", flush);
+  }, []);
+  useEffect(() => {
+    persist(prefix + "active-set", activeSet);
+    persist(prefix + "selected-person", person);
+  }, [activeSet, person]);
+  useEffect(() => {
+    if (!supabase || !auth || !ready || !online) return;
+    let fetching = false,
+      active = true;
+    const timer = setInterval(async () => {
+      if (fetching || !active) return;
+      fetching = true;
+      try {
+        await queue.current!.flush();
+        const fresh = await loadRemote();
+        if (!active) return;
+        setWorkouts(fresh.workouts);
+        setAvailablePeople(fresh.profiles.map((p) => p.name));
+        setDrafts((ds) =>
+          ds.filter(
+            (d) =>
+              d.entries.some((e) =>
+                e.sets.some((s) => s.weight !== "" || s.reps !== ""),
+              ) ||
+              !fresh.workouts.some(
+                (w) => w.user === d.user && w.round === d.round,
+              ),
+          ),
+        );
+      } catch {
+        setSynced(false);
+      } finally {
+        fetching = false;
+      }
+    }, 10000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [auth, ready, online]);
   const [email, setEmail] = useState(""),
     [password, setPassword] = useState("");
   const [muscle, setMuscle] = useState("Všechny partie"),
@@ -96,7 +210,11 @@ function App() {
   const notify = (s: string) => {
     setMessage(s);
   };
-  async function refresh(target?: Person) {
+  async function refresh(
+    target?: Person,
+    keepRound?: string,
+    forceCurrent = false,
+  ) {
     if (!supabase) return;
     const d = await loadRemote();
     const { data } = await supabase.auth.getUser();
@@ -107,19 +225,32 @@ function App() {
       );
     setOwner(me.name);
     persist(prefix + "verified-owner", me.name);
-    const selectedPerson = target ?? me.name;
+    const selectedPerson =
+      target ?? read<Person>(prefix + "selected-person", me.name);
     setPerson(selectedPerson);
     setAvailablePeople(d.profiles.map((p) => p.name));
+    persist(
+      prefix + "people",
+      d.profiles.map((p) => p.name),
+    );
     setSharedCycle({ day: d.cycle.day, round: d.cycle.round_id });
     setExercises(d.exercises);
     setWorkouts(d.workouts);
+    const pinned = keepRound ?? read(prefix + "cycle", { round: "" }).round;
+    const unfinishedRound = d.workouts.find(
+      (w) => w.round === pinned && !w.completed,
+    );
     const pending = d.workouts
       .filter((w) => w.user === selectedPerson && !w.completed)
       .sort((a, b) => a.date.localeCompare(b.date))[0];
     setCycle(
-      pending
-        ? { day: pending.day, round: pending.round }
-        : { day: d.cycle.day, round: d.cycle.round_id },
+      forceCurrent
+        ? { day: d.cycle.day, round: d.cycle.round_id }
+        : unfinishedRound
+          ? { day: unfinishedRound.day, round: unfinishedRound.round }
+          : pending
+            ? { day: pending.day, round: pending.round }
+            : { day: d.cycle.day, round: d.cycle.round_id },
     );
     setReady(true);
     setSynced(true);
@@ -145,9 +276,9 @@ function App() {
             );
           });
       });
-      const { data } = supabase.auth.onAuthStateChange((_e, s) => {
+      const { data } = supabase.auth.onAuthStateChange((event, s) => {
         setAuth(!!s);
-        if (s)
+        if (s && (event === "SIGNED_IN" || event === "INITIAL_SESSION"))
           setTimeout(
             () =>
               refresh().catch((e) => {
@@ -167,7 +298,7 @@ function App() {
               }),
             0,
           );
-        else setReady(false);
+        else if (!s) setReady(false);
       });
       return () => {
         data.subscription.unsubscribe();
@@ -227,10 +358,89 @@ function App() {
   };
   const update = (w: Workout) => {
     if (!editable || w.completed) return;
-    setDrafts((ds) => [
-      ...ds.filter((d) => !(d.user === w.user && d.round === w.round)),
-      w,
-    ]);
+    const changes = changedSets(workout, w);
+    setDrafts((ds) => {
+      const next = [
+        ...ds.filter((d) => !(d.user === w.user && d.round === w.round)),
+        w,
+      ];
+      persist(prefix + "drafts", next);
+      return next;
+    });
+    if (supabase) queue.current!.enqueue(w, changes);
+    else setSyncStatus("Uloženo v tomto telefonu");
+  };
+  const switchPerson = (p: Person) => {
+    if (supabase && !availablePeople.includes(p)) {
+      setSettings(true);
+      notify(
+        "David ještě nemá propojený účet. Postup najdete v Nastavení → Správa aplikace.",
+      );
+      return;
+    }
+    if (supabase) void queue.current!.flush();
+    setPerson(p);
+  };
+  const passTurn = (exercise: number, series: number) => {
+    const entry = workout.entries[exercise],
+      set = entry.sets[series];
+    if (!validSets([set, set, set])) {
+      notify("Nejprve vyplňte platnou váhu a počet opakování této série.");
+      return;
+    }
+    const other: Person = person === "Honza" ? "David" : "Honza";
+    if (supabase && !availablePeople.includes(other)) {
+      setSettings(true);
+      notify("Nejprve připojte Davidův účet. Zápis Honzy zůstává uložený.");
+      return;
+    }
+    let partner =
+      drafts.find((w) => w.user === other && w.round === cycle.round) ||
+      workouts.find((w) => w.user === other && w.round === cycle.round);
+    if (!partner || !partner.entries.length) {
+      const blank = {
+        ...makeDraft(),
+        id: partner?.id ?? uid(),
+        user: other,
+        entries: workout.entries.map((e) => ({
+          exerciseId: e.exerciseId,
+          sets: [0, 1, 2].map(() => ({ weight: "", reps: "" })),
+        })),
+      };
+      setDrafts((ds) => [...ds, blank]);
+    }
+    if (
+      partner &&
+      partner.entries[exercise]?.exerciseId !== entry.exerciseId &&
+      partner.entries[exercise]?.sets.every(
+        (s) => s.weight === "" && s.reps === "",
+      )
+    ) {
+      partner = structuredClone(partner);
+      partner.entries[exercise] = {
+        exerciseId: entry.exerciseId,
+        sets: [0, 1, 2].map(() => ({ weight: "", reps: "" })),
+      };
+      const changed = partner;
+      setDrafts((ds) => [
+        ...ds.filter((d) => !(d.user === other && d.round === cycle.round)),
+        changed!,
+      ]);
+    }
+    const turn = nextTurn(workout, partner, exercise, series);
+    if (!turn) {
+      notify(
+        `${other} už má všechny série zapsané. Dokončete zbývající série a trénink.`,
+      );
+      return;
+    }
+    setActiveSet({ exercise: turn.exercise, series: turn.series });
+    switchPerson(other);
+    requestAnimationFrame(() =>
+      document
+        .getElementById(`set-${turn.exercise}-${turn.series}`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" }),
+    );
   };
   const done = workout.entries.filter((e) => validSets(e.sets)).length;
   const last = (id: string, day: number, user = person) =>
@@ -248,9 +458,10 @@ function App() {
   async function save(finish = false) {
     if (!editable) return;
     if (
-      new Set(workout.entries.map((e) => e.exerciseId)).size !==
+      finish &&
+      (new Set(workout.entries.map((e) => e.exerciseId)).size !==
         workout.entries.length ||
-      !workout.entries.every((e) => e.exerciseId && validSets(e.sets))
+        !workout.entries.every((e) => e.exerciseId && validSets(e.sets)))
     ) {
       notify(
         "Vyplňte u každého cviku všechny 3 série: váha 0–2000 kg a 1–1000 opakování.",
@@ -258,13 +469,23 @@ function App() {
       return;
     }
     setBusy(true);
-    update(workout);
+    if (!finish) update(workout);
     try {
       if (supabase) {
-        const savedId = await saveRemote(workout);
-        if (finish)
-          await finishRemote({ ...workout, id: savedId || workout.id });
-        await refresh(person);
+        await queue.current!.flush();
+        if (queue.current!.pending().length)
+          throw Error(
+            "Některé série ještě nejsou odeslané. Zkuste to po obnovení připojení.",
+          );
+        if (finish) {
+          const fresh = await loadRemote();
+          const saved = fresh.workouts.find(
+            (w) => w.round === workout.round && w.user === person,
+          );
+          if (!saved) throw Error("Trénink ještě není v databázi.");
+          await finishRemote(saved);
+          await refresh(person, workout.round);
+        }
       } else {
         const w = { ...workout, completed: finish };
         setWorkouts((ws) => [...ws.filter((x) => x.id !== w.id), w]);
@@ -280,7 +501,8 @@ function App() {
           );
           const nextRound = uid();
           persist(prefix + "next-round-" + workout.round, nextRound);
-          setCycle((c) => ({ day: nextDay(c.day), round: nextRound }));
+          setSharedCycle({ day: nextDay(cycle.day), round: nextRound });
+          setPerson(other);
         }
       }
       if (
@@ -655,34 +877,7 @@ function App() {
                   <button
                     className={person === p ? "selected" : ""}
                     key={p}
-                    onClick={() => {
-                      if (supabase && !availablePeople.includes(p)) {
-                        setSettings(true);
-                        notify(
-                          "David ještě nemá propojený účet. Postup najdete v Nastavení → Správa aplikace.",
-                        );
-                        return;
-                      }
-                      setPerson(p);
-                      const pending = [...drafts, ...workouts]
-                        .filter((d) => d.user === p && !d.completed)
-                        .sort((a, b) => a.date.localeCompare(b.date))[0];
-                      if (pending)
-                        setCycle({ day: pending.day, round: pending.round });
-                      else if (supabase) setCycle(sharedCycle);
-                      else if (
-                        workouts.some(
-                          (w) => w.round === cycle.round && w.completed,
-                        )
-                      )
-                        setCycle({
-                          day: nextDay(cycle.day),
-                          round: read(
-                            prefix + "next-round-" + cycle.round,
-                            uid(),
-                          ),
-                        });
-                    }}
+                    onClick={() => switchPerson(p)}
                   >
                     <span>{p[0]}</span>
                     {p}
@@ -693,7 +888,13 @@ function App() {
           </div>
           {tab === "Trénink" && (
             <div className="editing-banner">
-              Zapisujete pro: <strong>{person}</strong>
+              Na řadě: <strong>{person}</strong>
+              <b className="sync-status" role="status">
+                {syncStatus ||
+                  (supabase
+                    ? "Průběžné ukládání zapnuté"
+                    : "Lokální ukládání zapnuté")}
+              </b>
               <span>
                 Přihlášený účet: {supabase ? owner : "demo"} · oba můžete
                 upravovat oba profily.
@@ -767,12 +968,38 @@ function App() {
                       key={index}
                       entry={entry}
                       index={index}
+                      person={person}
+                      activeSet={
+                        activeSet.exercise === index
+                          ? activeSet.series
+                          : undefined
+                      }
+                      onPass={(series) => passTurn(index, series)}
                       muscle={plan(cycle.day).slots[index]}
                       exercises={exercises}
                       previous={last(entry.exerciseId, cycle.day)}
                       disabled={!editable || workout.completed}
                       onChange={(entry) => {
                         const w = structuredClone(workout);
+                        if (
+                          w.entries.some(
+                            (e, i) =>
+                              i !== index && e.exerciseId === entry.exerciseId,
+                          )
+                        ) {
+                          notify(
+                            "Tento cvik už je v tréninku vybraný. Vyberte jiný.",
+                          );
+                          return;
+                        }
+                        if (w.entries[index].exerciseId !== entry.exerciseId)
+                          entry = {
+                            ...entry,
+                            sets: [0, 1, 2].map(() => ({
+                              weight: "",
+                              reps: "",
+                            })),
+                          };
                         w.entries[index] = entry;
                         update(w);
                       }}
@@ -780,7 +1007,8 @@ function App() {
                   ))}
                   <div className="save-bar">
                     <span>
-                      <Cloud size={16} /> Rozepsané série se ukládají v telefonu
+                      <Cloud size={16} />{" "}
+                      {syncStatus || "Rozepsané série se ukládají v telefonu"}
                     </span>
                     <button
                       className="secondary"
@@ -1310,7 +1538,7 @@ function App() {
                         new_day: day,
                       });
                       if (error) throw error;
-                      await refresh(person);
+                      await refresh(person, undefined, true);
                     } else setCycle({ day, round: uid() });
                   } catch (e) {
                     notify((e as Error).message);

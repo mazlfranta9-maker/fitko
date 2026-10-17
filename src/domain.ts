@@ -156,3 +156,25 @@ export function arrangeEntries(
   }
   return result;
 }
+
+export function nextTurn(
+  current: Workout,
+  partner: Workout | undefined,
+  exercise: number,
+  series: number,
+) {
+  const nextPerson: Person = current.user === "Honza" ? "David" : "Honza";
+  const total = current.entries.length * 3;
+  for (let offset = 0; offset < total; offset++) {
+    const flat = (exercise * 3 + series + offset) % total,
+      position = Math.floor(flat / 3),
+      index = flat % 3;
+    const target = current.entries[position];
+    const previous = partner?.entries.find(
+      (e) => e.exerciseId === target.exerciseId,
+    )?.sets[index];
+    if (!previous || !validSets([previous, previous, previous]))
+      return { person: nextPerson, exercise: position, series: index };
+  }
+  return null;
+}

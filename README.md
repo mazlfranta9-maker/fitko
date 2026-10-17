@@ -19,7 +19,7 @@ Bez proměnných Supabase se automaticky spustí jasně označené demo. Jeho te
 ## Připojení Supabase
 
 1. Vytvořte projekt na Supabase (pro dva uživatele obvykle stačí bezplatný tarif; jeho aktuální limity a uspávání projektu řídí poskytovatel).
-2. V SQL editoru jednou spusťte celý soubor `supabase/001_fitlog.sql`. Vytvoří tabulky, RPC, RLS, počáteční cyklus, knihovnu cviků a Storage bucket. Nevkládá žádné fiktivní výkony. Potom spusťte `supabase/003_shared_editing.sql`, který povoluje vzájemné zapisování Honzy a Davida.
+2. V SQL editoru jednou spusťte celý soubor `supabase/001_fitlog.sql`. Vytvoří tabulky, RPC, RLS, počáteční cyklus, knihovnu cviků a Storage bucket. Nevkládá žádné fiktivní výkony. Potom spusťte `supabase/003_shared_editing.sql`, který povoluje vzájemné zapisování Honzy a Davida, a `supabase/004_live_sets.sql` pro průběžné ukládání sérií.
 3. V Authentication → Users vytvořte dva uživatele s e-mailem a heslem, potvrďte jejich e-maily. V nastavení Authentication vypněte veřejnou registraci. Aplikace registraci neobsahuje.
 4. UUID těchto dvou účtů vložte přes SQL editor do profilů:
 
@@ -47,9 +47,9 @@ Do klienta nikdy nevkládejte `service_role`, secret key ani heslo databáze. Vi
 
 Kolo má vlastní UUID. Den cyklu není kalendářní datum. První dokončení zamkne kolo v databázové transakci, označí jej jako posunuté a vytvoří další den. Druhému profilu zachová nedokončený trénink stejného kola. Jeho následné dokončení cyklus podruhé neposune. Po dni 12 následuje den 1. Ruční změna v Nastavení vytváří nové společné kolo; staré záznamy nemaže.
 
-Každá změna pole se ukládá lokálně. Tlačítka Uložit / Dokončit odešlou celý trénink vybraného profilu transakčně do Supabase. Neúspěšný přenos nemaže místní koncept. Po návratu připojení jej odešlete znovu; starší rozepsané tréninky najdete v Nastavení, kde lze pokračovat v zápisu nebo odeslat kompletní záznam. Online data lze obnovit tlačítkem v Nastavení. Aplikace nepředstírá automatickou synchronizaci na pozadí ani průběžný realtime přenos každého stisku klávesy.
+Každá změna pole se ihned ukládá lokálně. Po přibližně 700 ms bez psaní se změněné série automaticky odešlou do Supabase, i když zbytek tréninku ještě není vyplněný. Fronta odesílá změny jednotlivých sérií, nikoliv celý zastaralý snímek tréninku. Při výpadku zůstává rozepsaný zápis i fronta v telefonu; po návratu připojení se přenos opakuje automaticky. Tlačítko Uložit vyvolá okamžité odeslání, Dokončit vyžaduje všechny tři série všech cviků. Stav zobrazuje „Ukládám online“, „Uloženo online“ nebo „Uloženo v telefonu · čeká na odeslání“. Data z druhého telefonu se načítají přibližně každých 10 sekund bez změny právě vybraného člověka a série. Nejde o stream každého stisku klávesy na všech zařízeních.
 
-Dva různé účty ukládají do různých řádků, takže se nepřepisují. Současná editace jednoho účtu na více telefonech není podporovaným způsobem práce (poslední potvrzené uložení vyhrává). Odhlášení ponechává místní koncepty pro pozdější obnovení; na sdíleném zařízení po práci vymažte data webu.
+Dva různé účty ukládají do různých řádků, takže se nepřepisují. Oba můžete zapisovat na obou telefonech. Změna jiné série nebo druhého profilu nepřepíše zbytek tréninku. Pokud upravíte tutéž sérii téhož člověka na obou telefonech současně, platí poslední úspěšné uložení. Odhlášení ponechává místní koncepty pro pozdější obnovení; na sdíleném zařízení po práci vymažte data webu.
 
 ## Android a nasazení
 
@@ -98,3 +98,15 @@ Pro vzájemné zápisy spusťte v Supabase SQL editoru pouze celý soubor `supab
 Pomocník nemá administrátorský klíč a sám účty nevytváří ani neposílá e-maily. E-mail do pomocníka zadáváte pouze pro vytvoření SQL; neodesílá jej žádné službě.
 
 Pořadí cviků: nejprve 3 cviky první hlavní partie (každý 3 série), potom 3 cviky druhé hlavní partie (každý 3 série), nakonec doplňky. Historické záznamy v původním střídavém pořadí lze nadále opravit; rozepsané tréninky se zobrazí seskupeně bez záměny sérií mezi cviky.
+
+## Střídání Honzy a Davida po jednotlivých sériích
+
+1. Vyberte Honzu a u cviku vyplňte váhu a opakování první série. Zápis se ukládá průběžně.
+2. Klepněte na **Zapsat sérii 1 · David →** (nebo použijte Enter v poli opakování). Aplikace ukáže Davida u téhož cviku a série.
+3. Po Davidově zápisu zvolte **Zapsat sérii 1 · Honza →**. Jestliže Honza první sérii už má, zvýrazní se jeho druhá série. Stejně pokračujte dál.
+4. Horní přepínač Honza/David lze kdykoli použít ručně; nemění den ani cvik. Výsledky obou lidí zůstávají oddělené a po obnovení stránky se obnoví i poslední vybraný člověk a série.
+5. Po dokončení všech cviků potvrďte trénink pro oba profily. Dokud je druhý trénink rozepsaný, obrazovka zůstává ve stejném společném kole; databázový cyklus se posune nejvýše jednou.
+
+**Pro již používanou databázi:** spusťte jednou celý soubor `supabase/004_live_sets.sql` v Supabase SQL editoru. Lze jej opakovat; zachovává historii a dovolí u rozepsaných tréninků nevyplněné váhy/opakování. Dokončení neúplného tréninku databáze odmítne. Soubor 004 zahrnuje také předchozí oprávnění a vzájemné zápisy z 002/003, není nutné je před ním znovu spouštět. Bez této aktualizace zůstává automatický zápis ve frontě telefonu a aplikace ukáže chybu; nelze tvrdit, že je uložený online.
+
+Test `src/live-database.test.ts` ověřuje skutečné SQL patch zápisy a nezávislost sérií při zastaralém snímku. `src/autosave.test.ts` ověřuje frontu, souběžnou novější editaci a obnovu po chybě. Prohlížečový test `e2e/autosave.spec.ts` používá řízený testovací transport bez skutečných přihlašovacích údajů; skutečný Supabase projekt a dva telefony je potřeba ověřit po spuštění migrace.

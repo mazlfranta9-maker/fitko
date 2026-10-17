@@ -44,8 +44,8 @@ export async function loadRemote() {
           sets: e.sets
             .sort((a: any, b: any) => a.ordinal - b.ordinal)
             .map((s: any) => ({
-              weight: String(s.weight),
-              reps: String(s.reps),
+              weight: s.weight === null ? "" : String(s.weight),
+              reps: s.reps === null ? "" : String(s.reps),
             })),
         })),
     })) as Workout[],
@@ -81,4 +81,14 @@ export async function saveExercise(e: Exercise) {
   const { error } = await supabase.from("exercises").upsert({ ...e, photo });
   if (error) throw error;
   return { ...e, photo };
+}
+
+export async function savePatch(job: import("./autosave").PendingSave) {
+  if (!supabase) throw Error("Supabase není připojen.");
+  const { data, error } = await supabase.rpc("save_workout_patch", {
+    payload: job.workout,
+    changes: job.changes,
+  });
+  if (error) throw error;
+  return data as string;
 }
