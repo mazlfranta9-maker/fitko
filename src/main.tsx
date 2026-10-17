@@ -47,6 +47,7 @@ import {
   savePatch,
 } from "./storage";
 import "./style.css";
+import { profileForAccount, hasLogin } from "./profiles";
 import { AutosaveQueue, changedSets, type PendingSave } from "./autosave";
 import { ManagementHelp } from "./components/ManagementHelp";
 import { ExerciseCard } from "./components/ExerciseCard";
@@ -64,6 +65,9 @@ function App() {
     [ready, setReady] = useState(!supabase);
   const [availablePeople, setAvailablePeople] = useState<Person[]>(
     supabase ? read<Person[]>(prefix + "people", []) : ["Honza", "David"],
+  );
+  const [davidLinked, setDavidLinked] = useState(
+    () => !supabase || read(prefix + "david-linked", false),
   );
   const [sharedCycle, setSharedCycle] = useState(() =>
     read(prefix + "cycle", { day: 1, round: uid() }),
@@ -173,6 +177,9 @@ function App() {
         if (!active) return;
         setWorkouts(fresh.workouts);
         setAvailablePeople(fresh.profiles.map((p) => p.name));
+        setDavidLinked(
+          hasLogin(fresh.profiles.find((p) => p.name === "David")),
+        );
         setDrafts((ds) =>
           ds.filter(
             (d) =>
@@ -218,17 +225,20 @@ function App() {
     if (!supabase) return;
     const d = await loadRemote();
     const { data } = await supabase.auth.getUser();
-    const me = d.profiles.find((p) => p.id === data.user?.id);
+    const me = profileForAccount(d.profiles, data.user?.id);
     if (!me)
       throw Error(
         "Účet nemá profil Honza nebo David. Správce musí dokončit nastavení databáze.",
       );
-    setOwner(me.name);
+    setOwner(me.name as Person);
     persist(prefix + "verified-owner", me.name);
     const selectedPerson =
-      target ?? read<Person>(prefix + "selected-person", me.name);
+      target ?? read<Person>(prefix + "selected-person", me.name as Person);
     setPerson(selectedPerson);
     setAvailablePeople(d.profiles.map((p) => p.name));
+    const linked = hasLogin(d.profiles.find((p) => p.name === "David"));
+    setDavidLinked(linked);
+    persist(prefix + "david-linked", linked);
     persist(
       prefix + "people",
       d.profiles.map((p) => p.name),
@@ -374,7 +384,7 @@ function App() {
     if (supabase && !availablePeople.includes(p)) {
       setSettings(true);
       notify(
-        "David ještě nemá propojený účet. Postup najdete v Nastavení → Správa aplikace.",
+        "Davidův profil ještě není připravený. Spusťte aktualizaci 005 v Supabase; potom půjde přepínat bez přihlášení.",
       );
       return;
     }
@@ -391,7 +401,9 @@ function App() {
     const other: Person = person === "Honza" ? "David" : "Honza";
     if (supabase && !availablePeople.includes(other)) {
       setSettings(true);
-      notify("Nejprve připojte Davidův účet. Zápis Honzy zůstává uložený.");
+      notify(
+        "Nejprve připravte profil David aktualizací 005. Jeho e-mail zatím není potřeba. Zápis Honzy zůstává uložený.",
+      );
       return;
     }
     let partner =
@@ -959,7 +971,7 @@ function App() {
                   </div>
                   {!editable && (
                     <div className="demo-note">
-                      Vybraný profil ještě nemá propojený účet. Přidejte jej v
+                      Vybraný profil ještě není připravený. Postup najdete v
                       Nastavení.
                     </div>
                   )}
@@ -1553,7 +1565,10 @@ function App() {
                 ))}
               </select>
             </label>
-            <ManagementHelp availablePeople={availablePeople} />
+            <ManagementHelp
+              availablePeople={availablePeople}
+              davidLinked={davidLinked}
+            />
             <p>
               Přihlášený účet: <b>{owner}</b>
               <br />

@@ -1,10 +1,13 @@
 import { useState } from "react";
+import { linkDavidSql } from "../profiles";
 import type { Person } from "../domain";
 const base = "https://supabase.com/dashboard/project/dzrbtoxrfjvssaugqmhn";
 export function ManagementHelp({
   availablePeople,
+  davidLinked = false,
 }: {
   availablePeople: Person[];
+  davidLinked?: boolean;
 }) {
   const [email, setEmail] = useState(""),
     [sql, setSql] = useState(""),
@@ -69,11 +72,27 @@ export function ManagementHelp({
           </a>
         </div>
       </details>
+      <div className="management-links">
+        <a
+          href="https://github.com/mazlfranta9-maker/fitko/blob/main/supabase/005_profiles_without_login.sql"
+          target="_blank"
+          rel="noreferrer"
+        >
+          005 — přepínání profilů před založením Davidova účtu
+        </a>
+      </div>
       <h3>Přístup pro Davida</h3>
       <p>
-        {availablePeople.includes("David")
-          ? "Profil David je propojený s účtem. David se přihlašuje vlastním e-mailem a heslem."
-          : "David zatím nemá připojený profil."}
+        {davidLinked
+          ? "David má vlastní přihlášení. Jeho dosavadní výsledky zůstávají u profilu David."
+          : availablePeople.includes("David")
+            ? "Profil David je připravený. Můžete mu ihned zapisovat přepínačem Honza / David bez zadání e-mailu a hesla. Vlastní přihlášení mu můžete připojit později."
+            : "Pro okamžité přepínání nejprve spusťte aktualizaci 005 v Supabase. Davidův e-mail zatím není potřeba."}
+      </p>
+      <p>
+        Následující kroky jsou potřeba až pro Davidovo vlastní přihlášení na
+        jeho telefonu. Nepřesouvají ani nemažou výsledky. Po přihlášení oba
+        vidíte i upravujete Honzu i Davida.
       </p>
       <ol>
         <li>
@@ -96,10 +115,7 @@ export function ManagementHelp({
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          const value = email.trim().replaceAll("'", "''");
-          setSql(
-            `DO $$\nDECLARE account_id uuid;\nBEGIN\n SELECT id INTO account_id FROM auth.users WHERE lower(email) = lower('${value}');\n IF account_id IS NULL THEN RAISE EXCEPTION 'Nejprve vytvořte tento účet v Authentication → Users'; END IF;\n IF EXISTS (SELECT 1 FROM public.profiles WHERE name = 'David' AND id <> account_id) THEN RAISE EXCEPTION 'David už je propojen s jiným účtem. Stávající profil nemažte.'; END IF;\n IF EXISTS (SELECT 1 FROM public.profiles WHERE id = account_id AND name <> 'David') THEN RAISE EXCEPTION 'Tento účet patří Honzovi. Pro Davida použijte jiný e-mail.'; END IF;\n INSERT INTO public.profiles(id,name) VALUES(account_id,'David') ON CONFLICT(id) DO NOTHING;\nEND $$;`,
-          );
+          setSql(linkDavidSql(email));
           setCopied(false);
         }}
       >

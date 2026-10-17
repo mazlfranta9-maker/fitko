@@ -19,17 +19,18 @@ Bez proměnných Supabase se automaticky spustí jasně označené demo. Jeho te
 ## Připojení Supabase
 
 1. Vytvořte projekt na Supabase (pro dva uživatele obvykle stačí bezplatný tarif; jeho aktuální limity a uspávání projektu řídí poskytovatel).
-2. V SQL editoru jednou spusťte celý soubor `supabase/001_fitlog.sql`. Vytvoří tabulky, RPC, RLS, počáteční cyklus, knihovnu cviků a Storage bucket. Nevkládá žádné fiktivní výkony. Potom spusťte `supabase/003_shared_editing.sql`, který povoluje vzájemné zapisování Honzy a Davida, a `supabase/004_live_sets.sql` pro průběžné ukládání sérií.
+2. V SQL editoru jednou spusťte celý soubor `supabase/001_fitlog.sql`. Vytvoří tabulky, RPC, RLS, počáteční cyklus, knihovnu cviků a Storage bucket. Nevkládá žádné fiktivní výkony. Potom spusťte `supabase/003_shared_editing.sql`, který povoluje vzájemné zapisování Honzy a Davida, a `supabase/004_live_sets.sql` pro průběžné ukládání sérií. Následně spusťte `supabase/005_profiles_without_login.sql`, který odděluje cvičící profily od přihlášení.
 3. V Authentication → Users vytvořte dva uživatele s e-mailem a heslem, potvrďte jejich e-maily. V nastavení Authentication vypněte veřejnou registraci. Aplikace registraci neobsahuje.
 4. UUID těchto dvou účtů vložte přes SQL editor do profilů:
 
 ```sql
 insert into public.profiles (id, name) values
-('UUID-UCTU-HONZY', 'Honza'),
-('UUID-UCTU-DAVIDA', 'David');
+('UUID-UCTU-HONZY', 'Honza');
+-- Profil David už připravila migrace 005. Jeho přihlášení připojte
+-- pomocníkem ve FitLogu → Nastavení → Správa aplikace (bez změny ID profilu).
 ```
 
-Unikátní názvy a omezení tabulky povolují pouze tyto dva profily. Neprofilovaný účet nemá přístup k datům. Nevytvářejte obecnou politiku umožňující přístup všem.
+Unikátní názvy a omezení tabulky povolují pouze tyto dva profily. Sloupec `profiles.id` je stabilní ID cvičícího; `profiles.auth_user_id` je volitelné propojení s přihlašovacím účtem. Neprofilovaný účet nemá přístup k datům. Nevytvářejte obecnou politiku umožňující přístup všem.
 
 5. Zkopírujte `.env.example` do `.env.local` a doplňte URL projektu a veřejný anon/publishable klíč:
 
@@ -92,7 +93,7 @@ Pro vzájemné zápisy spusťte v Supabase SQL editoru pouze celý soubor `supab
 
 1. Supabase → Authentication → Users → Add user → **Create new user**.
 2. Zadejte Davidův e-mail, nastavte mu vlastní heslo a zapněte **Auto Confirm User**. Předání hesla řešte soukromě.
-3. Ve FitLogu → Nastavení → Správa aplikace zadejte stejný e-mail. Pomocník vytvoří SQL, které propojí existující účet s profilem David. SQL vložte do nového dotazu v Supabase SQL editoru a spusťte Run. Pokud účet chybí nebo profil patří jinému účtu, dotaz změnu odmítne a vypíše důvod.
+3. Ve FitLogu → Nastavení → Správa aplikace zadejte stejný e-mail. Pomocník vytvoří SQL, které propojí existující účet s profilem David. SQL vložte do nového dotazu v Supabase SQL editoru a spusťte Run. Pokud účet chybí nebo profil patří jinému účtu, dotaz změnu odmítne a vypíše důvod. Již připravený profil David se propojí přes `auth_user_id`; jeho ID i dosavadní výsledky se zachovají.
 4. V aplikaci obnovte online data. David otevře stejnou HTTPS adresu aplikace a přihlásí se svým e-mailem a heslem. Ověřte zápis a zobrazení téhož výsledku na druhém telefonu.
 
 Pomocník nemá administrátorský klíč a sám účty nevytváří ani neposílá e-maily. E-mail do pomocníka zadáváte pouze pro vytvoření SQL; neodesílá jej žádné službě.
@@ -110,3 +111,11 @@ Pořadí cviků: nejprve 3 cviky první hlavní partie (každý 3 série), potom
 **Pro již používanou databázi:** spusťte jednou celý soubor `supabase/004_live_sets.sql` v Supabase SQL editoru. Lze jej opakovat; zachovává historii a dovolí u rozepsaných tréninků nevyplněné váhy/opakování. Dokončení neúplného tréninku databáze odmítne. Soubor 004 zahrnuje také předchozí oprávnění a vzájemné zápisy z 002/003, není nutné je před ním znovu spouštět. Bez této aktualizace zůstává automatický zápis ve frontě telefonu a aplikace ukáže chybu; nelze tvrdit, že je uložený online.
 
 Test `src/live-database.test.ts` ověřuje skutečné SQL patch zápisy a nezávislost sérií při zastaralém snímku. `src/autosave.test.ts` ověřuje frontu, souběžnou novější editaci a obnovu po chybě. Prohlížečový test `e2e/autosave.spec.ts` používá řízený testovací transport bez skutečných přihlašovacích údajů; skutečný Supabase projekt a dva telefony je potřeba ověřit po spuštění migrace.
+
+## Přepínání lidí bez přihlašování
+
+Kliknutí na **Honza / David vpravo** vybírá člověka, kterému zapisujete. Neodhlašuje vás a nevyžaduje e-mail ani heslo. Honza může ihned zapisovat Davidovi, i když David zatím vlastní přihlášení nemá. Rozsah přístupu se tím nerozšiřuje na veřejnost: databázi dál čte a upravuje pouze přihlášený účet připojený k jednomu ze dvou profilů.
+
+Pro existující projekt spusťte po aktualizaci 004 soubor **`supabase/005_profiles_without_login.sql`**. Připraví profil David bez přihlašovacího účtu a zachová existující ID i záznamy. Pokud oba profily již mají účty, pouze doplní jejich vazby. Opakované spuštění nevytvoří dalšího Davida.
+
+Až David později dostane vlastní účet, připojí se k existujícímu profilu v Nastavení pomocí e-mailu. Po přihlášení uvidí dosavadní Davidovy i Honzovy výsledky a může mezi nimi jedním kliknutím přepínat. Nevytváří se nová prázdná historie ani kopie Honzových vah pro Davida. Změny z druhého telefonu se načítají přibližně po 10 sekundách; lze také obnovit online data v Nastavení.
