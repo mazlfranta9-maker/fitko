@@ -19,7 +19,7 @@ Bez proměnných Supabase se automaticky spustí jasně označené demo. Jeho te
 ## Připojení Supabase
 
 1. Vytvořte projekt na Supabase (pro dva uživatele obvykle stačí bezplatný tarif; jeho aktuální limity a uspávání projektu řídí poskytovatel).
-2. V SQL editoru jednou spusťte celý soubor `supabase/001_fitlog.sql`. Vytvoří tabulky, RPC, RLS, počáteční cyklus, knihovnu cviků a Storage bucket. Nevkládá žádné fiktivní výkony.
+2. V SQL editoru jednou spusťte celý soubor `supabase/001_fitlog.sql`. Vytvoří tabulky, RPC, RLS, počáteční cyklus, knihovnu cviků a Storage bucket. Nevkládá žádné fiktivní výkony. Potom spusťte `supabase/003_shared_editing.sql`, který povoluje vzájemné zapisování Honzy a Davida.
 3. V Authentication → Users vytvořte dva uživatele s e-mailem a heslem, potvrďte jejich e-maily. V nastavení Authentication vypněte veřejnou registraci. Aplikace registraci neobsahuje.
 4. UUID těchto dvou účtů vložte přes SQL editor do profilů:
 
@@ -40,14 +40,14 @@ VITE_SUPABASE_ANON_KEY=VAS_VEREJNY_KLIC
 
 Do klienta nikdy nevkládejte `service_role`, secret key ani heslo databáze. Vite tyto hodnoty zabudovává při sestavení; po změně je nutný restart vývoje nebo nové sestavení. `.env.local` se necommituje.
 
-6. Restartujte aplikaci. Zobrazí se přihlášení místo dema. Přihlaste se každý svým účtem. Oba mohou číst výsledky obou, změny výkonů jsou povolené pouze vlastníkovi. Knihovna cviků a plán jsou sdílené. Fotografie cviků mají veřejné URL; bucket je určen pro obrázky vybavení a cviků.
-7. Ověřte ze dvou telefonů zápis a dokončení stejného kola, obnovení dat v Nastavení, nahrání fotografie a odmítnutí změny cizích výsledků. Toto ověření na vašem skutečném projektu zatím nebylo provedeno.
+6. Restartujte aplikaci. Zobrazí se přihlášení místo dema. Přihlaste se každý svým účtem. Oba mohou číst, zapisovat, opravovat i mazat výsledky obou profilů. Výsledek vždy zůstává přiřazen zvolenému cvičícímu, nikoli účtu, který jej zapsal. Knihovna cviků a plán jsou sdílené. Fotografie cviků mají veřejné URL; bucket je určen pro obrázky vybavení a cviků.
+7. Ověřte ze dvou telefonů zápis a dokončení stejného kola, obnovení dat v Nastavení, nahrání fotografie a odmítnutí přístupu účtu bez profilu Honza/David. Toto ověření na vašem skutečném projektu zatím nebylo provedeno.
 
 ### Jak funguje společný cyklus a offline zápis
 
 Kolo má vlastní UUID. Den cyklu není kalendářní datum. První dokončení zamkne kolo v databázové transakci, označí jej jako posunuté a vytvoří další den. Druhému profilu zachová nedokončený trénink stejného kola. Jeho následné dokončení cyklus podruhé neposune. Po dni 12 následuje den 1. Ruční změna v Nastavení vytváří nové společné kolo; staré záznamy nemaže.
 
-Každá změna pole se ukládá lokálně. Tlačítka Uložit / Dokončit odešlou celý vlastní trénink transakčně do Supabase. Neúspěšný přenos nemaže místní koncept. Po návratu připojení jej odešlete znovu; starší rozepsané tréninky najdete v Nastavení, kde lze pokračovat v zápisu nebo odeslat kompletní záznam. Online data lze obnovit tlačítkem v Nastavení. Aplikace nepředstírá automatickou synchronizaci na pozadí ani průběžný realtime přenos každého stisku klávesy.
+Každá změna pole se ukládá lokálně. Tlačítka Uložit / Dokončit odešlou celý trénink vybraného profilu transakčně do Supabase. Neúspěšný přenos nemaže místní koncept. Po návratu připojení jej odešlete znovu; starší rozepsané tréninky najdete v Nastavení, kde lze pokračovat v zápisu nebo odeslat kompletní záznam. Online data lze obnovit tlačítkem v Nastavení. Aplikace nepředstírá automatickou synchronizaci na pozadí ani průběžný realtime přenos každého stisku klávesy.
 
 Dva různé účty ukládají do různých řádků, takže se nepřepisují. Současná editace jednoho účtu na více telefonech není podporovaným způsobem práce (poslední potvrzené uložení vyhrává). Odhlášení ponechává místní koncepty pro pozdější obnovení; na sdíleném zařízení po práci vymažte data webu.
 
@@ -65,10 +65,36 @@ Na Androidu otevřete HTTPS adresu v Chrome → nabídka ⋮ → **Nainstalovat 
 
 ## Testy a struktura
 
-- `npm test`: pravidla všech 12 dní, střídání cviků, desetinné váhy, tři série; skutečné provedení SQL v lokálním PostgreSQL enginu PGlite, rollback chybného zápisu, oddělení profilů, RLS a idempotentní dokončení společného kola.
+- `npm test`: pravidla všech 12 dní, seskupení cviků podle partií, desetinné váhy, tři série; skutečné provedení SQL v lokálním PostgreSQL enginu PGlite, rollback chybného zápisu, oddělení profilů, RLS a idempotentní dokončení společného kola.
 - `npm run test:e2e`: mobilní Chromium, zápis / reload / dokončení obou profilů / knihovna / historie / progres. Nejprve spusťte `npm run dev`. Konfigurace v tomto cloudovém prostředí používá `/usr/bin/chromium`; na jiném stroji upravte `executablePath` nebo jej odeberte a spusťte `npx playwright install chromium`.
 - `src/domain.ts`: pravidla a typy; `src/storage.ts`: persistence a Supabase; `src/main.tsx`: obrazovky; `src/style.css`: responzivní vzhled; `supabase/001_fitlog.sql`: databázová migrace.
 
 Lokální databázový test nenahrazuje integraci se skutečným Supabase Auth, Storage ani test dvou fyzických telefonů. Nasazení a instalace na skutečném Androidu se musí ověřit na cílové HTTPS adrese.
 
 Pro opakování produkčního offline testu spusťte také `npm run preview` a pak `FITLOG_PWA_TEST=1 npm run test:e2e`.
+
+## Přehled správy pro Honzu a Davida
+
+V aplikaci otevřete ozubené kolečko → **Správa aplikace a přidání Davida**. Najdete tam odkazy na aplikaci, Netlify, Supabase i GitHub a pomocníka pro propojení Davidova e-mailu. Na telefonu je hlavní navigace nahoře a zůstává viditelná při posouvání.
+
+- **FitLog:** každodenní zápis cviků, vah, opakování, historie a progres. Tlačítka Honza/David vybírají, **komu zapisujete výsledky**. Oba přihlášení členové mohou upravovat oba profily; jméno právě přihlášeného účtu vidíte v Nastavení.
+- **Supabase:** databáze, fotografie a dva přihlašovací účty. Správcovské přihlášení do Supabase není heslo do FitLogu.
+- **GitHub:** zdrojový kód a historie oprav.
+- **Netlify:** sestaví kód z GitHubu a zpřístupní web. Proměnné prostředí určují připojení k Supabase.
+
+V prohlížeči si přes Ctrl+D uložte odkazy do společné složky záložek **FitLog**. Aplikaci na Androidu lze nainstalovat z nabídky Chrome.
+
+### Aktualizace již existující databáze
+
+Pro vzájemné zápisy spusťte v Supabase SQL editoru pouze celý soubor `supabase/003_shared_editing.sql`. Je transakční a opakovatelné spuštění je bezpečné; existující tréninky nemaže. Původní `001_fitlog.sql` znovu nespouštějte. Aktualizace kódu na GitHubu sama o sobě SQL v Supabase nespouští.
+
+### Přidání Davidova účtu
+
+1. Supabase → Authentication → Users → Add user → **Create new user**.
+2. Zadejte Davidův e-mail, nastavte mu vlastní heslo a zapněte **Auto Confirm User**. Předání hesla řešte soukromě.
+3. Ve FitLogu → Nastavení → Správa aplikace zadejte stejný e-mail. Pomocník vytvoří SQL, které propojí existující účet s profilem David. SQL vložte do nového dotazu v Supabase SQL editoru a spusťte Run. Pokud účet chybí nebo profil patří jinému účtu, dotaz změnu odmítne a vypíše důvod.
+4. V aplikaci obnovte online data. David otevře stejnou HTTPS adresu aplikace a přihlásí se svým e-mailem a heslem. Ověřte zápis a zobrazení téhož výsledku na druhém telefonu.
+
+Pomocník nemá administrátorský klíč a sám účty nevytváří ani neposílá e-maily. E-mail do pomocníka zadáváte pouze pro vytvoření SQL; neodesílá jej žádné službě.
+
+Pořadí cviků: nejprve 3 cviky první hlavní partie (každý 3 série), potom 3 cviky druhé hlavní partie (každý 3 série), nakonec doplňky. Historické záznamy v původním střídavém pořadí lze nadále opravit; rozepsané tréninky se zobrazí seskupeně bez záměny sérií mezi cviky.

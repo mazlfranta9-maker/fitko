@@ -38,6 +38,12 @@ it("SQL migrace, transakční série, RLS a právě jeden posun sdíleného kola
     (await db.query<{ n: number }>("select count(*)::int n from sets")).rows[0]
       .n,
   ).toBe(24);
+  await db.exec(readFileSync("supabase/003_shared_editing.sql", "utf8"));
+  await db.exec(readFileSync("supabase/003_shared_editing.sql", "utf8"));
+  await db.exec(
+    "grant usage on schema auth to authenticated; set role authenticated;",
+  );
+  await db.query("select set_config('test.uid',$1,false)", [d]);
   await db.query("select complete_workout($1)", [hw]);
   await db.query("select complete_workout($1)", [hw]);
   expect(
@@ -49,6 +55,7 @@ it("SQL migrace, transakční série, RLS a právě jeden posun sdíleného kola
       d,
     ])
   ).rows[0].id;
+  await db.query("select set_config('test.uid',$1,false)", [h]);
   await db.query("select save_workout($1::jsonb)", [
     JSON.stringify(payload("David", "20000000-0000-4000-8000-000000000099")),
   ]);
@@ -56,11 +63,34 @@ it("SQL migrace, transakční série, RLS a právě jeden posun sdíleného kola
   expect(
     (await db.query<{ day: number }>("select day from cycle")).rows[0].day,
   ).toBe(2);
+  await db.query("select set_config('test.uid',$1,false)", [d]);
+  const corrected = payload("Honza", hw);
+  corrected.entries[0].sets[0].weight = "77,5";
+  await db.query("select save_workout($1::jsonb)", [JSON.stringify(corrected)]);
+  expect(
+    (
+      await db.query<{ user_id: string }>(
+        "select user_id from workouts where id=$1",
+        [hw],
+      )
+    ).rows[0].user_id,
+  ).toBe(h);
+  expect(
+    (
+      await db.query<{ weight: string }>(
+        "select s.weight from sets s join workout_exercises e on e.id=s.workout_exercise_id where e.workout_id=$1 and e.position=0 and s.ordinal=1",
+        [hw],
+      )
+    ).rows[0].weight,
+  ).toBe("77.50");
+  const legacy = payload("Honza", hw);
+  legacy.entries = [0, 3, 1, 4, 2, 5, 6, 7].map((i) => legacy.entries[i]);
+  await db.query("select save_workout($1::jsonb)", [JSON.stringify(legacy)]);
+  const wrong = payload("Honza", hw);
+  wrong.entries[0].exerciseId = wrong.entries[3].exerciseId;
   await expect(
-    db.query("select save_workout($1::jsonb)", [
-      JSON.stringify(payload("Honza", hw)),
-    ]),
-  ).rejects.toThrow("Cizí profil");
+    db.query("select save_workout($1::jsonb)", [JSON.stringify(wrong)]),
+  ).rejects.toThrow("Nesprávná partie nebo duplicitní cvik");
   const bad = payload("David", dw);
   bad.entries[0].sets.pop();
   await expect(
@@ -81,6 +111,24 @@ it("SQL migrace, transakční série, RLS a právě jeden posun sdíleného kola
       [h],
     ),
   ).rejects.toThrow("permission denied for table workouts");
+  expect(
+    (await db.query("delete from workouts where id=$1 returning id", [hw]))
+      .rows,
+  ).toHaveLength(1);
+  await db.query(
+    "select set_config('test.uid','10000000-0000-4000-8000-000000000003',false)",
+  );
+  await expect(
+    db.query("select save_workout($1::jsonb)", [
+      JSON.stringify(payload("David", dw)),
+    ]),
+  ).rejects.toThrow("Nepovolený účet");
+  await expect(db.query("select complete_workout($1)", [dw])).rejects.toThrow(
+    "Nepovolený účet",
+  );
+  expect(
+    (await db.query("delete from workouts returning id")).rows,
+  ).toHaveLength(0);
   await db.query("select set_config('test.uid','',false)");
   expect((await db.query("select * from workouts")).rows).toHaveLength(0);
   await db.close();

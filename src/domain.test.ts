@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   plan,
+  arrangeEntries,
   nextDay,
   typeOf,
   selected,
@@ -20,17 +21,48 @@ describe("Tréninkový systém", () => {
     expect(days).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     expect(d).toBe(1);
   });
-  it("střídá celé cviky a den 4 začíná bicepsem", () =>
+  it("nejdřív dokončí tři cviky jedné partie, potom tři druhé", () => {
+    expect(plan(1).slots).toEqual([
+      "Prsa",
+      "Prsa",
+      "Prsa",
+      "Biceps",
+      "Biceps",
+      "Biceps",
+      "Předloktí",
+      "Břicho",
+    ]);
     expect(plan(4).slots).toEqual([
       "Biceps",
-      "Prsa",
+      "Biceps",
       "Biceps",
       "Prsa",
-      "Biceps",
+      "Prsa",
       "Prsa",
       "Předloktí",
       "Břicho",
-    ]));
+    ]);
+  });
+  it("přeřazení starého konceptu zachová série u správného cviku", () => {
+    const ids = selected(1, seedExercises);
+    const order = [0, 3, 1, 4, 2, 5, 6, 7];
+    const entries = order.map((i) => ({
+      exerciseId: ids[i],
+      sets: [0, 1, 2].map(() => ({ weight: String(i + 1), reps: "10" })),
+    }));
+    const arranged = arrangeEntries(1, entries, seedExercises);
+    expect(arranged.map((e) => e.exerciseId)).toEqual(ids);
+    expect(arranged.map((e) => e.sets[0].weight)).toEqual([
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+    ]);
+  });
   it("má břicho každý den, tři cviky pro hlavní partie a jeden pro doplňky", () => {
     for (let d = 1; d <= 12; d++) {
       const p = plan(d);

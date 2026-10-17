@@ -28,14 +28,17 @@ create policy entries_read on public.workout_exercises for select to authenticat
 create policy sets_read on public.sets for select to authenticated using(public.is_member());
 -- Všechny zápisy výsledků procházejí transakční RPC; přímé zápisy RLS nepovoluje.
 create function public.save_workout(payload jsonb) returns uuid language plpgsql security definer set search_path=public as $$
-declare wid uuid; rid uuid; d integer; ex jsonb; s jsonb; eid uuid; pos integer:=0; ord integer; existing public.workouts; expected text[]; main text[]; counts jsonb:='{}'; seen text[]:='{}';
+declare wid uuid; rid uuid; d integer; ex jsonb; s jsonb; eid uuid; pos integer:=0; ord integer; existing public.workouts; expected text[]; main text[]; counts jsonb:='{}'; seen text[]:='{}'; legacy text[]; actual text[];
 begin
  if not public.is_member() then raise exception 'Nepovolený účet'; end if;
  if payload->>'user' <> (select name from public.profiles where id=auth.uid()) then raise exception 'Cizí profil'; end if;
  wid:=(payload->>'id')::uuid; rid:=(payload->>'round')::uuid;
  select day into d from public.rounds where id=rid; if d is null or d<>(payload->>'day')::int then raise exception 'Neplatný den cyklu'; end if;
  main:=case ((d-1)%6) when 0 then array['Prsa','Biceps'] when 1 then array['Záda','Triceps'] when 2 then array['Nohy','Ramena'] when 3 then array['Biceps','Prsa'] when 4 then array['Triceps','Záda'] else array['Ramena','Nohy'] end;
- expected:=main||main||main||case when 'Prsa'=any(main) then array['Předloktí','Břicho'] when 'Záda'=any(main) then array['Bedra','Břicho'] else array['Trapézy','Lýtka','Břicho'] end;
+ expected:=array[main[1],main[1],main[1],main[2],main[2],main[2]]||case when 'Prsa'=any(main) then array['Předloktí','Břicho'] when 'Záda'=any(main) then array['Bedra','Břicho'] else array['Trapézy','Lýtka','Břicho'] end;
+ legacy:=main||main||main||expected[7:array_length(expected,1)];
+ select array_agg(e.muscle order by a.ordinality) into actual from jsonb_array_elements(payload->'entries') with ordinality a(value,ordinality) left join public.exercises e on e.id=a.value->>'exerciseId';
+ if actual=legacy then expected:=legacy; end if;
  if jsonb_array_length(payload->'entries')<>array_length(expected,1) then raise exception 'Nesprávný počet cviků'; end if;
  -- Serializace zápisů jednoho uživatele a kola.
  perform pg_advisory_xact_lock(hashtextextended(rid::text||auth.uid()::text,0));

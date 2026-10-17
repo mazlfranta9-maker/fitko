@@ -1175,14 +1175,14 @@ h4 {
 }
 @media (max-width: 650px) {
   aside {
-    inset: auto 0 0;
+    inset: 0 0 auto;
     width: auto;
     height: 74px;
     padding: 0;
     background: var(--panel);
     border-right: 0;
-    border-top: 1px solid var(--line);
-    padding-bottom: env(safe-area-inset-bottom);
+    border-bottom: 1px solid var(--line);
+    padding-top: env(safe-area-inset-top);
   }
   .brand,
   .aside-caption,
@@ -1218,7 +1218,8 @@ h4 {
   .main {
     margin: 0;
     width: 100%;
-    padding-bottom: 80px;
+    padding-top: calc(74px + env(safe-area-inset-top));
+    padding-bottom: 16px;
   }
   header {
     height: 60px;
@@ -1535,5 +1536,81 @@ h4 {
   }
   footer span:last-child {
     display: none;
+  }
+}
+
+.editing-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  background: var(--accent-bg);
+  border-radius: 8px;
+  color: var(--text);
+}
+.editing-banner strong {
+  color: var(--accent);
+}
+.editing-banner span {
+  font-size: 10px;
+  color: var(--muted);
+}
+.management-help {
+  border-top: 1px solid var(--line);
+  padding-top: 15px;
+}
+.management-help summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 15px;
+  padding: 10px 0;
+}
+.management-help a {
+  color: var(--accent);
+}
+.management-help ol {
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.management-help form {
+  display: grid;
+  gap: 10px;
+}
+.management-help textarea {
+  min-height: 190px;
+  font-size: 11px;
+  resize: vertical;
+  width: 100%;
+}
+.management-links {
+  display: grid;
+  gap: 10px;
+  margin: 10px 0 20px;
+}
+.management-links a {
+  font-size: 13px;
+  line-height: 1.6;
+}
+.management-help p {
+  margin: 10px 0;
+}
+@media (max-width: 650px) {
+  aside {
+    height: calc(74px + env(safe-area-inset-top));
+    border-top: 0;
+  }
+  .toast {
+    bottom: 20px;
+  }
+  .editing-banner {
+    font-size: 11px;
+  }
+  .editing-banner span {
+    width: 100%;
   }
 }

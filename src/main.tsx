@@ -29,6 +29,7 @@ import {
   typeOf,
   nextDay,
   selected,
+  arrangeEntries,
   validSets,
   volume,
   kg,
@@ -44,6 +45,7 @@ import {
   saveExercise,
 } from "./storage";
 import "./style.css";
+import { ManagementHelp } from "./components/ManagementHelp";
 import { ExerciseCard } from "./components/ExerciseCard";
 const uid = (): string => crypto.randomUUID();
 const fmt = (n: number) =>
@@ -55,6 +57,12 @@ function App() {
     [owner, setOwner] = useState<Person>("Honza"),
     [auth, setAuth] = useState(false),
     [ready, setReady] = useState(!supabase);
+  const [availablePeople, setAvailablePeople] = useState<Person[]>(
+    supabase ? [] : ["Honza", "David"],
+  );
+  const [sharedCycle, setSharedCycle] = useState(() =>
+    read(prefix + "cycle", { day: 1, round: uid() }),
+  );
   const [synced, setSynced] = useState(false);
   const [exercises, setExercises] = useState<Exercise[]>(() =>
     read(prefix + "exercises", supabase ? [] : seedExercises),
@@ -88,7 +96,7 @@ function App() {
   const notify = (s: string) => {
     setMessage(s);
   };
-  async function refresh() {
+  async function refresh(target?: Person) {
     if (!supabase) return;
     const d = await loadRemote();
     const { data } = await supabase.auth.getUser();
@@ -99,11 +107,14 @@ function App() {
       );
     setOwner(me.name);
     persist(prefix + "verified-owner", me.name);
-    setPerson(me.name);
+    const selectedPerson = target ?? me.name;
+    setPerson(selectedPerson);
+    setAvailablePeople(d.profiles.map((p) => p.name));
+    setSharedCycle({ day: d.cycle.day, round: d.cycle.round_id });
     setExercises(d.exercises);
     setWorkouts(d.workouts);
     const pending = d.workouts
-      .filter((w) => w.user === me.name && !w.completed)
+      .filter((w) => w.user === selectedPerson && !w.completed)
       .sort((a, b) => a.date.localeCompare(b.date))[0];
     setCycle(
       pending
@@ -185,7 +196,7 @@ function App() {
     document.documentElement.dataset.theme = light ? "light" : "dark";
     persist("fitlog-light", light);
   }, [light]);
-  const editable = !supabase || person === owner;
+  const editable = !supabase || availablePeople.includes(person);
   const current =
     drafts.find((w) => w.user === person && w.round === cycle.round) ||
     workouts.find((w) => w.user === person && w.round === cycle.round);
@@ -201,11 +212,19 @@ function App() {
       sets: [0, 1, 2].map(() => ({ weight: "", reps: "" })),
     })),
   });
-  const workout = current
+  const originalWorkout = current
     ? current.entries.length
       ? current
       : { ...current, entries: makeDraft().entries }
     : makeDraft();
+  const workout = {
+    ...originalWorkout,
+    entries: arrangeEntries(
+      originalWorkout.day,
+      originalWorkout.entries,
+      exercises,
+    ),
+  };
   const update = (w: Workout) => {
     if (!editable || w.completed) return;
     setDrafts((ds) => [
@@ -245,7 +264,7 @@ function App() {
         const savedId = await saveRemote(workout);
         if (finish)
           await finishRemote({ ...workout, id: savedId || workout.id });
-        await refresh();
+        await refresh(person);
       } else {
         const w = { ...workout, completed: finish };
         setWorkouts((ws) => [...ws.filter((x) => x.id !== w.id), w]);
@@ -637,10 +656,20 @@ function App() {
                     className={person === p ? "selected" : ""}
                     key={p}
                     onClick={() => {
+                      if (supabase && !availablePeople.includes(p)) {
+                        setSettings(true);
+                        notify(
+                          "David ještě nemá propojený účet. Postup najdete v Nastavení → Správa aplikace.",
+                        );
+                        return;
+                      }
                       setPerson(p);
-                      const pending = drafts.find((d) => d.user === p);
+                      const pending = [...drafts, ...workouts]
+                        .filter((d) => d.user === p && !d.completed)
+                        .sort((a, b) => a.date.localeCompare(b.date))[0];
                       if (pending)
                         setCycle({ day: pending.day, round: pending.round });
+                      else if (supabase) setCycle(sharedCycle);
                       else if (
                         workouts.some(
                           (w) => w.round === cycle.round && w.completed,
@@ -662,6 +691,15 @@ function App() {
               </div>
             )}
           </div>
+          {tab === "Trénink" && (
+            <div className="editing-banner">
+              Zapisujete pro: <strong>{person}</strong>
+              <span>
+                Přihlášený účet: {supabase ? owner : "demo"} · oba můžete
+                upravovat oba profily.
+              </span>
+            </div>
+          )}
           {!supabase && (
             <div className="demo-note">
               <Cloud size={15} /> Demo · data se ukládají pouze v tomto
@@ -720,8 +758,8 @@ function App() {
                   </div>
                   {!editable && (
                     <div className="demo-note">
-                      Prohlížíš výsledky druhého uživatele. Zápis je dostupný
-                      pouze vlastníkovi.
+                      Vybraný profil ještě nemá propojený účet. Přidejte jej v
+                      Nastavení.
                     </div>
                   )}
                   {workout.entries.map((entry, index) => (
@@ -864,14 +902,14 @@ function App() {
                         {w.completed ? "Dokončeno" : "Uloženo"}
                       </span>
                     </div>
-                    {(!supabase || w.user === owner) && (
+                    {
                       <div className="history-actions">
                         <button
                           className="secondary"
                           onClick={async () => {
                             if (
                               !confirm(
-                                "Opravit série tohoto vlastního tréninku?",
+                                `Opravit série tréninku uživatele ${w.user}?`,
                               )
                             )
                               return;
@@ -920,7 +958,7 @@ function App() {
                           onClick={async () => {
                             if (
                               !confirm(
-                                "Opravdu smazat tento vlastní záznam? Cyklus se nevrátí.",
+                                "Opravdu smazat tento záznam? Cyklus se nevrátí.",
                               )
                             )
                               return;
@@ -946,7 +984,7 @@ function App() {
                           Smazat
                         </button>
                       </div>
-                    )}
+                    }
                   </div>
                   {w.entries.map((e, i) => {
                     const ex = exercises.find((x) => x.id === e.exerciseId);
@@ -1272,7 +1310,7 @@ function App() {
                         new_day: day,
                       });
                       if (error) throw error;
-                      await refresh();
+                      await refresh(person);
                     } else setCycle({ day, round: uid() });
                   } catch (e) {
                     notify((e as Error).message);
@@ -1287,11 +1325,12 @@ function App() {
                 ))}
               </select>
             </label>
+            <ManagementHelp availablePeople={availablePeople} />
             <p>
-              Profil: <b>{owner}</b>
+              Přihlášený účet: <b>{owner}</b>
               <br />
               {supabase
-                ? "Účet Supabase"
+                ? "Honza i David mohou zapisovat a opravovat výsledky obou profilů."
                 : "Demo: oba profily můžeš upravovat."}
             </p>
             <p>
@@ -1300,62 +1339,60 @@ function App() {
             </p>
             {drafts.length > 0 && (
               <div className="draft-list">
-                {drafts
-                  .filter((d) => !supabase || d.user === owner)
-                  .map((d) => (
-                    <div key={d.id}>
-                      <span>
-                        {d.user} · den {d.day} ·{" "}
-                        {new Date(d.date).toLocaleDateString("cs-CZ")}
-                      </span>
-                      <button
-                        className="secondary"
-                        onClick={() => {
-                          setPerson(d.user);
-                          setCycle({ day: d.day, round: d.round });
-                          setSettings(false);
-                          setTab("Trénink");
-                        }}
-                      >
-                        Pokračovat v zápisu
-                      </button>
-                      <button
-                        className="secondary"
-                        onClick={async () => {
-                          if (
-                            !d.entries.every(
-                              (e) => e.exerciseId && validSets(e.sets),
-                            )
-                          ) {
-                            notify(
-                              "Zápis je neúplný. Nejprve jej doplňte v odpovídajícím tréninku.",
-                            );
-                            return;
+                {drafts.map((d) => (
+                  <div key={d.id}>
+                    <span>
+                      {d.user} · den {d.day} ·{" "}
+                      {new Date(d.date).toLocaleDateString("cs-CZ")}
+                    </span>
+                    <button
+                      className="secondary"
+                      onClick={() => {
+                        setPerson(d.user);
+                        setCycle({ day: d.day, round: d.round });
+                        setSettings(false);
+                        setTab("Trénink");
+                      }}
+                    >
+                      Pokračovat v zápisu
+                    </button>
+                    <button
+                      className="secondary"
+                      onClick={async () => {
+                        if (
+                          !d.entries.every(
+                            (e) => e.exerciseId && validSets(e.sets),
+                          )
+                        ) {
+                          notify(
+                            "Zápis je neúplný. Nejprve jej doplňte v odpovídajícím tréninku.",
+                          );
+                          return;
+                        }
+                        try {
+                          if (supabase) {
+                            const savedId = await saveRemote(d);
+                            await finishRemote({ ...d, id: savedId || d.id });
+                            await refresh(person);
+                          } else {
+                            setWorkouts((ws) => [
+                              ...ws.filter((w) => w.id !== d.id),
+                              { ...d, completed: true },
+                            ]);
+                            if (cycle.round === d.round)
+                              setCycle({ day: nextDay(d.day), round: uid() });
                           }
-                          try {
-                            if (supabase) {
-                              const savedId = await saveRemote(d);
-                              await finishRemote({ ...d, id: savedId || d.id });
-                              await refresh();
-                            } else {
-                              setWorkouts((ws) => [
-                                ...ws.filter((w) => w.id !== d.id),
-                                { ...d, completed: true },
-                              ]);
-                              if (cycle.round === d.round)
-                                setCycle({ day: nextDay(d.day), round: uid() });
-                            }
-                            setDrafts((ds) => ds.filter((x) => x.id !== d.id));
-                            notify("Zápis odeslán a dokončen.");
-                          } catch (e) {
-                            notify((e as Error).message);
-                          }
-                        }}
-                      >
-                        Odeslat a dokončit
-                      </button>
-                    </div>
-                  ))}
+                          setDrafts((ds) => ds.filter((x) => x.id !== d.id));
+                          notify("Zápis odeslán a dokončen.");
+                        } catch (e) {
+                          notify((e as Error).message);
+                        }
+                      }}
+                    >
+                      Odeslat a dokončit
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
             {supabase && (

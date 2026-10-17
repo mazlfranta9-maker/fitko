@@ -50,7 +50,7 @@ export function plan(day: number) {
   return {
     main,
     extra,
-    slots: [...Array.from({ length: 3 }, () => main).flat(), ...extra],
+    slots: [...main.flatMap((m) => [m, m, m]), ...extra],
   };
 }
 export function validSets(sets: SetEntry[]) {
@@ -136,4 +136,23 @@ export function demoHistory(): Workout[] {
       })),
     })),
   );
+}
+
+// Starší koncepty přeřadíme podle partií, přičemž série cestují se svým cvikem.
+export function arrangeEntries(
+  day: number,
+  entries: Workout["entries"],
+  exercises: Exercise[],
+): Workout["entries"] {
+  if (entries.length !== plan(day).slots.length) return entries;
+  const remaining = [...entries],
+    result: Workout["entries"] = [];
+  for (const muscle of plan(day).slots) {
+    const index = remaining.findIndex(
+      (e) => exercises.find((x) => x.id === e.exerciseId)?.muscle === muscle,
+    );
+    if (index < 0) return entries;
+    result.push(remaining.splice(index, 1)[0]);
+  }
+  return result;
 }
