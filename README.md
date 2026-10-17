@@ -119,3 +119,5 @@ Kliknutí na **Honza / David vpravo** vybírá člověka, kterému zapisujete. N
 Pro existující projekt spusťte po aktualizaci 004 soubor **`supabase/005_profiles_without_login.sql`**. Připraví profil David bez přihlašovacího účtu a zachová existující ID i záznamy. Pokud oba profily již mají účty, pouze doplní jejich vazby. Opakované spuštění nevytvoří dalšího Davida.
 
 Až David později dostane vlastní účet, připojí se k existujícímu profilu v Nastavení pomocí e-mailu. Po přihlášení uvidí dosavadní Davidovy i Honzovy výsledky a může mezi nimi jedním kliknutím přepínat. Nevytváří se nová prázdná historie ani kopie Honzových vah pro Davida. Změny z druhého telefonu se načítají přibližně po 10 sekundách; lze také obnovit online data v Nastavení.
+
+Přepínač Honza/David ani předání série nikdy samo neotevírá Nastavení. Když profil v databázi ještě chybí, lze přesto ihned zapisovat v telefonu; jasný stav upozorňuje, že online odeslání čeká. Fronta zůstane uložená a po přípravě profilu aktualizací 005 a obnovení online dat se automaticky odešle. Do té doby data prohlížeče nemažte.

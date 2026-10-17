@@ -101,6 +101,8 @@ function App() {
       setActiveSet({ exercise: 0, series: 0 });
     }
   }, [cycle.round]);
+  const knownPeople = useRef(availablePeople);
+  knownPeople.current = availablePeople;
   const canSync = useRef(false);
   canSync.current = !!supabase && auth && ready && online;
   const queue = useRef<AutosaveQueue | null>(null);
@@ -108,6 +110,13 @@ function App() {
     queue.current = new AutosaveQueue(
       async (job) => {
         if (!canSync.current) throw Error("Čeká na připojení.");
+        if (!knownPeople.current.includes(job.workout.user)) {
+          const error = Object.assign(
+            new Error("Profil zatím čeká na přípravu online úložiště."),
+            { code: "LOCAL_ONLY" },
+          );
+          throw error;
+        }
         await savePatch(job);
         const fresh = await loadRemote();
         setWorkouts(fresh.workouts);
@@ -137,7 +146,12 @@ function App() {
         );
         if (status === "error") setSynced(false);
         else if (status === "saved") setSynced(true);
-        if (error && navigator.onLine && canSync.current)
+        if (
+          error &&
+          (error as { code?: string }).code !== "LOCAL_ONLY" &&
+          navigator.onLine &&
+          canSync.current
+        )
           setMessage(
             "Průběžné uložení selhalo: " +
               ((error as { code?: string }).code === "PGRST202" ||
@@ -152,7 +166,7 @@ function App() {
     );
   useEffect(() => {
     if (supabase && auth && ready && online) void queue.current!.flush();
-  }, [auth, ready, online]);
+  }, [auth, ready, online, availablePeople]);
   useEffect(() => {
     const flush = () => {
       if (document.visibilityState === "hidden") void queue.current!.flush();
@@ -337,7 +351,8 @@ function App() {
     document.documentElement.dataset.theme = light ? "light" : "dark";
     persist("fitlog-light", light);
   }, [light]);
-  const editable = !supabase || availablePeople.includes(person);
+  const editable = !supabase || auth;
+  const localOnly = !!supabase && !availablePeople.includes(person);
   const current =
     drafts.find((w) => w.user === person && w.round === cycle.round) ||
     workouts.find((w) => w.user === person && w.round === cycle.round);
@@ -381,13 +396,6 @@ function App() {
     else setSyncStatus("Uloženo v tomto telefonu");
   };
   const switchPerson = (p: Person) => {
-    if (supabase && !availablePeople.includes(p)) {
-      setSettings(true);
-      notify(
-        "Davidův profil ještě není připravený. Spusťte aktualizaci 005 v Supabase; potom půjde přepínat bez přihlášení.",
-      );
-      return;
-    }
     if (supabase) void queue.current!.flush();
     setPerson(p);
   };
@@ -399,13 +407,6 @@ function App() {
       return;
     }
     const other: Person = person === "Honza" ? "David" : "Honza";
-    if (supabase && !availablePeople.includes(other)) {
-      setSettings(true);
-      notify(
-        "Nejprve připravte profil David aktualizací 005. Jeho e-mail zatím není potřeba. Zápis Honzy zůstává uložený.",
-      );
-      return;
-    }
     let partner =
       drafts.find((w) => w.user === other && w.round === cycle.round) ||
       workouts.find((w) => w.user === other && w.round === cycle.round);
@@ -902,10 +903,12 @@ function App() {
             <div className="editing-banner">
               Na řadě: <strong>{person}</strong>
               <b className="sync-status" role="status">
-                {syncStatus ||
-                  (supabase
-                    ? "Průběžné ukládání zapnuté"
-                    : "Lokální ukládání zapnuté")}
+                {localOnly
+                  ? "Uložení v telefonu · online zatím čeká"
+                  : syncStatus ||
+                    (supabase
+                      ? "Průběžné ukládání zapnuté"
+                      : "Lokální ukládání zapnuté")}
               </b>
               <span>
                 Přihlášený účet: {supabase ? owner : "demo"} · oba můžete
@@ -969,10 +972,11 @@ function App() {
                         : "Postupně snižuj váhu ↘"}
                     </span>
                   </div>
-                  {!editable && (
+                  {localOnly && (
                     <div className="demo-note">
-                      Vybraný profil ještě není připravený. Postup najdete v
-                      Nastavení.
+                      Zápis pro {person} se nyní ukládá v tomto telefonu.
+                      Jakmile bude připravený online profil, odešle se
+                      automaticky.
                     </div>
                   )}
                   {workout.entries.map((entry, index) => (
