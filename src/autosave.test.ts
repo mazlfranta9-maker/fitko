@@ -132,3 +132,81 @@ it("chyba jednoho profilu nezablokuje odeslání druhého", async () => {
   expect(q.pending().map((j) => j.workout.user)).toEqual(["Honza"]);
   q.dispose();
 });
+it("prázdná fronta nehlásí potvrzený online zápis", async () => {
+  const status = vi.fn();
+  const q = new AutosaveQueue(
+    async () => {},
+    () => {},
+    status,
+  );
+  await q.flush();
+  expect(status).not.toHaveBeenCalled();
+});
+it("souběžná editace posílá pouze změněná pole a sloučí pole ve frontě", async () => {
+  const send = vi.fn(async (_job: PendingSave) => {});
+  const q = new AutosaveQueue(
+    send,
+    () => {},
+    () => {},
+  );
+  const a = workout(),
+    b = structuredClone(a);
+  b.entries[0].sets[0].weight = "20";
+  expect(changedSets(a, b)[0].fields).toEqual(["weight"]);
+  q.enqueue(b, changedSets(a, b));
+  const c = structuredClone(b);
+  c.entries[0].sets[0].reps = "10";
+  q.enqueue(c, changedSets(b, c));
+  await q.flush();
+  expect(send.mock.calls[0][0].changes[0].fields).toEqual(["weight", "reps"]);
+});
+it("po potvrzení starší revize neopakuje již potvrzená pole", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const calls: PendingSave[] = [];
+  const q = new AutosaveQueue(
+    async (job) => {
+      calls.push(job);
+      if (calls.length === 1) await gate;
+    },
+    () => {},
+    () => {},
+  );
+  const a = workout(),
+    b = structuredClone(a);
+  b.entries[0].sets[0].weight = "20";
+  q.enqueue(b, changedSets(a, b));
+  const running = q.flush();
+  const c = structuredClone(b);
+  c.entries[0].sets[0].reps = "10";
+  q.enqueue(c, changedSets(b, c));
+  release();
+  await running;
+  expect(calls[1].changes[0].fields).toEqual(["reps"]);
+});
+it("reconnect během dobíhajícího chybového přenosu neztratí požadavek na opakování", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  let calls = 0;
+  const q = new AutosaveQueue(
+    async () => {
+      if (++calls === 1) {
+        await gate;
+        throw Error("offline");
+      }
+    },
+    () => {},
+    () => {},
+  );
+  const a = workout(),
+    b = structuredClone(a);
+  b.entries[0].sets[0] = { weight: "20", reps: "10" };
+  q.enqueue(b, changedSets(a, b));
+  const first = q.flush();
+  const online = q.flush();
+  release();
+  await Promise.all([first, online]);
+  expect(calls).toBe(2);
+  expect(q.pending()).toEqual([]);
+  q.dispose();
+});

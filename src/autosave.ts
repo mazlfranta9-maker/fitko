@@ -6,6 +6,7 @@ export type SetPatch = {
   weight: string;
   reps: string;
   replaceExercise?: boolean;
+  fields?: ("weight" | "reps")[];
 };
 export type PendingSave = {
   workout: Workout;
@@ -27,6 +28,9 @@ export function changedSets(before: Workout, after: Workout): SetPatch[] {
               exerciseId: e.exerciseId,
               ...s,
               replaceExercise: replaced,
+              fields: (["weight", "reps"] as const).filter(
+                (field) => replaced || old?.sets[index]?.[field] !== s[field],
+              ),
             },
           ]
         : [];
@@ -37,6 +41,7 @@ export function changedSets(before: Workout, after: Workout): SetPatch[] {
 export class AutosaveQueue {
   private jobs: Record<string, PendingSave>;
   private running: Promise<void> | null = null;
+  private flushRequested = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private revision = 0;
   constructor(
@@ -66,6 +71,13 @@ export class AutosaveQueue {
       merged.set(k, {
         ...c,
         replaceExercise: c.replaceExercise || merged.get(k)?.replaceExercise,
+        fields: [
+          ...new Set([
+            ...(merged.get(k)?.fields ??
+              (merged.has(k) ? (["weight", "reps"] as const) : [])),
+            ...(c.fields ?? ["weight", "reps"]),
+          ]),
+        ],
       });
     }
     this.jobs[key] = {
@@ -80,31 +92,62 @@ export class AutosaveQueue {
   }
   flush(): Promise<void> {
     clearTimeout(this.timer);
-    if (this.running) return this.running;
-    this.running = this.drain().finally(() => {
+    if (this.running) {
+      this.flushRequested = true;
+      return this.running;
+    }
+    this.running = this.drainRequested().finally(() => {
       this.running = null;
     });
     return this.running;
   }
+  private async drainRequested() {
+    do {
+      this.flushRequested = false;
+      await this.drain();
+    } while (this.flushRequested);
+  }
   private async drain() {
     const failed = new Set<string>();
     let lastError: unknown;
+    let sent = false;
     for (;;) {
       const key = Object.keys(this.jobs).find((key) => !failed.has(key));
       if (!key) {
-        this.status(failed.size ? "error" : "saved", lastError);
+        if (failed.size || sent)
+          this.status(failed.size ? "error" : "saved", lastError);
         return;
       }
       const job = structuredClone(this.jobs[key]);
       this.status("saving");
       try {
         await this.send(job);
+        sent = true;
       } catch (e) {
         failed.add(key);
         lastError = e;
         continue;
       }
       if (this.jobs[key]?.revision === job.revision) delete this.jobs[key];
+      else if (this.jobs[key]) {
+        // Remove only fields acknowledged by this request. Keep edits made
+        // during the request, without replaying unrelated old fields.
+        this.jobs[key].changes = this.jobs[key].changes.flatMap((current) => {
+          const sent = job.changes.find(
+            (c) =>
+              c.exerciseId === current.exerciseId &&
+              c.ordinal === current.ordinal,
+          );
+          if (!sent) return [current];
+          const fields = (current.fields ?? ["weight", "reps"]).filter(
+            (field) =>
+              !(sent.fields ?? ["weight", "reps"]).includes(field) ||
+              current[field] !== sent[field],
+          );
+          return fields.length ? [{ ...current, fields }] : [];
+        });
+        if (!this.jobs[key].changes.length) delete this.jobs[key];
+      }
       this.persist(this.jobs);
     }
   }
