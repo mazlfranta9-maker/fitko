@@ -47,6 +47,8 @@ import {
   savePatch,
 } from "./storage";
 import "./style.css";
+import { followHonza, sharedRound } from "./shared-plan";
+import { recoverDraft } from "./recovery";
 import { profileForAccount, hasLogin } from "./profiles";
 import { AutosaveQueue, changedSets, type PendingSave } from "./autosave";
 import { ManagementHelp } from "./components/ManagementHelp";
@@ -94,6 +96,7 @@ function App() {
     read(prefix + "active-set", { exercise: 0, series: 0 }),
   );
   const [syncStatus, setSyncStatus] = useState("");
+  const restored = useRef(false);
   const previousRound = useRef(cycle.round);
   useEffect(() => {
     if (previousRound.current !== cycle.round) {
@@ -105,6 +108,10 @@ function App() {
   knownPeople.current = availablePeople;
   const canSync = useRef(false);
   canSync.current = !!supabase && auth && ready && online;
+  const exercisesRef = useRef(exercises);
+  exercisesRef.current = exercises;
+  const snapshots = useRef({ drafts, workouts });
+  snapshots.current = { drafts, workouts };
   const queue = useRef<AutosaveQueue | null>(null);
   if (!queue.current)
     queue.current = new AutosaveQueue(
@@ -117,7 +124,52 @@ function App() {
           );
           throw error;
         }
-        await savePatch(job);
+        const canonical = arrangeEntries(
+          job.workout.day,
+          job.workout.entries,
+          exercisesRef.current,
+        );
+        const honza = [
+          ...snapshots.current.drafts,
+          ...snapshots.current.workouts,
+        ].find(
+          (w) =>
+            w.user === "Honza" &&
+            w.round === job.workout.round &&
+            w.entries.length,
+        );
+        const honzaPlan =
+          job.workout.user === "Honza"
+            ? canonical.map((e) => e.exerciseId)
+            : honza
+              ? arrangeEntries(
+                  honza.day,
+                  honza.entries,
+                  exercisesRef.current,
+                ).map((e) => e.exerciseId)
+              : selected(job.workout.day, exercisesRef.current);
+        await savePatch(
+          {
+            ...job,
+            workout: {
+              ...job.workout,
+              entries: arrangeEntries(
+                job.workout.day,
+                job.workout.entries,
+                exercisesRef.current,
+              ),
+            },
+            changes: job.changes.map((c) => ({
+              ...c,
+              position: arrangeEntries(
+                job.workout.day,
+                job.workout.entries,
+                exercisesRef.current,
+              ).findIndex((e) => e.exerciseId === c.exerciseId),
+            })),
+          },
+          honzaPlan,
+        );
         const fresh = await loadRemote();
         setWorkouts(fresh.workouts);
         setDrafts((ds) => {
@@ -135,6 +187,7 @@ function App() {
       },
       (jobs) => persist(prefix + "outbox", jobs),
       (status, error) => {
+        if (status === "saved" && !canSync.current) return;
         setSyncStatus(
           status === "waiting"
             ? "Čeká na odeslání…"
@@ -260,25 +313,86 @@ function App() {
     setSharedCycle({ day: d.cycle.day, round: d.cycle.round_id });
     setExercises(d.exercises);
     setWorkouts(d.workouts);
-    const pinned = keepRound ?? read(prefix + "cycle", { round: "" }).round;
-    const unfinishedRound = d.workouts.find(
-      (w) => w.round === pinned && !w.completed,
-    );
-    const pending = d.workouts
-      .filter((w) => w.user === selectedPerson && !w.completed)
-      .sort((a, b) => a.date.localeCompare(b.date))[0];
     setCycle(
       forceCurrent
         ? { day: d.cycle.day, round: d.cycle.round_id }
-        : unfinishedRound
-          ? { day: unfinishedRound.day, round: unfinishedRound.round }
-          : pending
-            ? { day: pending.day, round: pending.round }
-            : { day: d.cycle.day, round: d.cycle.round_id },
+        : sharedRound(
+            d.workouts,
+            { day: d.cycle.day, round: d.cycle.round_id },
+            queue.current!.pending().map((j) => j.workout),
+            keepRound,
+          ),
     );
+    if (!restored.current) {
+      let conflicts = false;
+      for (const draft of read<Workout[]>(prefix + "drafts", [])) {
+        const pending = queue
+          .current!.pending()
+          .find(
+            (j) =>
+              j.workout.round === draft.round && j.workout.user === draft.user,
+          );
+        const result = recoverDraft(
+          draft,
+          d.workouts.find(
+            (w) => w.round === draft.round && w.user === draft.user,
+          ),
+          d.exercises,
+          pending,
+        );
+        conflicts ||= result.conflicts;
+        queue.current!.enqueue(result.workout, result.changes);
+      }
+      restored.current = true;
+      if (conflicts)
+        notify(
+          "Starší místní koncept se liší od online dat. Je zachován v zařízení; rozdílné vyplněné hodnoty nepřepisujeme. Zkontrolujte jej v Nastavení a potvrďte požadované hodnoty úpravou série.",
+        );
+    }
     setReady(true);
-    setSynced(true);
+    setSynced(false);
+    setMessage((previous) =>
+      previous.startsWith("Online data nejsou dostupná") ||
+      previous.startsWith("Načtení online dat selhalo")
+        ? ""
+        : previous,
+    );
   }
+  useEffect(() => {
+    if (!supabase || !auth || !online) return;
+    let active = true,
+      fetching = false;
+    const resume = async () => {
+      if (!active || fetching || document.visibilityState === "hidden") return;
+      fetching = true;
+      try {
+        await refresh();
+      } catch (error) {
+        if (active) {
+          setSynced(false);
+          setMessage(
+            "Načtení online dat selhalo, lokální zápis zůstává zachován. " +
+              (error as Error).message,
+          );
+        }
+      } finally {
+        fetching = false;
+      }
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void resume();
+    };
+    window.addEventListener("focus", resume);
+    document.addEventListener("visibilitychange", onVisible);
+    const retry = !ready ? setInterval(resume, 10000) : undefined;
+    if (!ready) void resume();
+    return () => {
+      active = false;
+      clearInterval(retry);
+      window.removeEventListener("focus", resume);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [auth, online, ready]);
   useEffect(() => {
     const on = () => setOnline(navigator.onLine);
     window.addEventListener("online", on);
@@ -373,7 +487,7 @@ function App() {
       ? current
       : { ...current, entries: makeDraft().entries }
     : makeDraft();
-  const workout = {
+  const arrangedWorkout = {
     ...originalWorkout,
     entries: arrangeEntries(
       originalWorkout.day,
@@ -381,8 +495,51 @@ function App() {
       exercises,
     ),
   };
+  const honzaSource = drafts.find(
+    (w) => w.user === "Honza" && w.round === cycle.round && w.entries.length,
+  ) ||
+    workouts.find(
+      (w) => w.user === "Honza" && w.round === cycle.round && w.entries.length,
+    ) || { ...makeDraft(), user: "Honza" as Person };
+  const shared =
+    person === "David"
+      ? followHonza(arrangedWorkout, honzaSource, exercises)
+      : { workout: arrangedWorkout, conflict: false };
+  const workout = shared.workout;
+  const confirmed = workouts.find(
+    (w) => w.user === person && w.round === workout.round,
+  );
+  const isConfirmed =
+    !!confirmed &&
+    workout.entries.length > 0 &&
+    workout.entries.every((e) => {
+      const saved = confirmed.entries.find(
+        (x) => x.exerciseId === e.exerciseId,
+      );
+      return e.sets.every((s, i) =>
+        (["weight", "reps"] as const).every((field) => {
+          const value = saved?.sets[i]?.[field];
+          return (
+            value !== undefined &&
+            (s[field] === ""
+              ? value === ""
+              : value !== "" &&
+                Number(s[field].replace(",", ".")) === Number(value))
+          );
+        }),
+      );
+    }) &&
+    !queue
+      .current!.pending()
+      .some(
+        (j) => j.workout.user === person && j.workout.round === workout.round,
+      );
+  const visibleSyncStatus =
+    syncStatus === "Uloženo online" && !isConfirmed
+      ? "Místní zápis · zkontrolujte synchronizaci"
+      : syncStatus;
   const update = (w: Workout) => {
-    if (!editable || w.completed) return;
+    if (!editable || w.completed || shared.conflict) return;
     const changes = changedSets(workout, w);
     setDrafts((ds) => {
       const next = [
@@ -415,14 +572,17 @@ function App() {
         ...makeDraft(),
         id: partner?.id ?? uid(),
         user: other,
-        entries: workout.entries.map((e) => ({
-          exerciseId: e.exerciseId,
-          sets: [0, 1, 2].map(() => ({ weight: "", reps: "" })),
-        })),
+        entries: (other === "Honza" ? honzaSource : workout).entries.map(
+          (e) => ({
+            exerciseId: e.exerciseId,
+            sets: [0, 1, 2].map(() => ({ weight: "", reps: "" })),
+          }),
+        ),
       };
       setDrafts((ds) => [...ds, blank]);
     }
     if (
+      person === "Honza" &&
       partner &&
       partner.entries[exercise]?.exerciseId !== entry.exerciseId &&
       partner.entries[exercise]?.sets.every(
@@ -905,7 +1065,7 @@ function App() {
               <b className="sync-status" role="status">
                 {localOnly
                   ? "Uložení v telefonu · online zatím čeká"
-                  : syncStatus ||
+                  : visibleSyncStatus ||
                     (supabase
                       ? "Průběžné ukládání zapnuté"
                       : "Lokální ukládání zapnuté")}
@@ -979,6 +1139,13 @@ function App() {
                       automaticky.
                     </div>
                   )}
+                  {shared.conflict && (
+                    <p role="alert">
+                      Davidův starší zápis má jiné cviky než Honza. Uložené
+                      série zachováváme; toto kolo vyžaduje kontrolu před
+                      dalšími zápisy.
+                    </p>
+                  )}
                   {workout.entries.map((entry, index) => (
                     <ExerciseCard
                       key={index}
@@ -994,7 +1161,27 @@ function App() {
                       muscle={plan(cycle.day).slots[index]}
                       exercises={exercises}
                       previous={last(entry.exerciseId, cycle.day)}
-                      disabled={!editable || workout.completed}
+                      disabled={
+                        !editable || workout.completed || shared.conflict
+                      }
+                      selectionDisabled={
+                        person === "David" ||
+                        workout.entries[index].sets.some(
+                          (s) => s.weight !== "" || s.reps !== "",
+                        ) ||
+                        [...drafts, ...workouts].some(
+                          (w) =>
+                            w.round === workout.round &&
+                            w.user === "David" &&
+                            w.entries.some(
+                              (e) =>
+                                e.exerciseId === entry.exerciseId &&
+                                e.sets.some(
+                                  (s) => s.weight !== "" || s.reps !== "",
+                                ),
+                            ),
+                        )
+                      }
                       onChange={(entry) => {
                         const w = structuredClone(workout);
                         if (
@@ -1008,6 +1195,11 @@ function App() {
                           );
                           return;
                         }
+                        if (
+                          person === "David" &&
+                          w.entries[index].exerciseId !== entry.exerciseId
+                        )
+                          return;
                         if (w.entries[index].exerciseId !== entry.exerciseId)
                           entry = {
                             ...entry,
@@ -1024,14 +1216,15 @@ function App() {
                   <div className="save-bar">
                     <span>
                       <Cloud size={16} />{" "}
-                      {syncStatus || "Rozepsané série se ukládají v telefonu"}
+                      {visibleSyncStatus ||
+                        "Rozepsané série se ukládají v telefonu"}
                     </span>
                     <button
                       className="secondary"
                       disabled={busy || !editable}
                       onClick={() => save()}
                     >
-                      Uložit trénink
+                      {supabase ? "Opakovat synchronizaci" : "Uložit trénink"}
                     </button>
                   </div>
                 </section>
@@ -1581,9 +1774,45 @@ function App() {
                 : "Demo: oba profily můžeš upravovat."}
             </p>
             <p>
+              Verze synchronizace: 2026.10.18 · společné cviky. Kolo:{" "}
+              {cycle.round}
+              <br />
               {online ? "Telefon je online." : "Telefon je offline."}{" "}
               {drafts.length} lokálně rozpracovaných tréninků.
             </p>
+            <button
+              className="secondary"
+              onClick={() => {
+                const storage = Object.fromEntries(
+                  Object.keys(localStorage)
+                    .filter((key) => key.startsWith("fitlog-"))
+                    .map((key) => [key, localStorage.getItem(key)]),
+                );
+                const url = URL.createObjectURL(
+                  new Blob(
+                    [
+                      JSON.stringify(
+                        {
+                          createdAt: new Date().toISOString(),
+                          origin: location.origin,
+                          storage,
+                        },
+                        null,
+                        2,
+                      ),
+                    ],
+                    { type: "application/json" },
+                  ),
+                );
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = `FitLog-mistni-zaloha-${Date.now()}.json`;
+                link.click();
+                setTimeout(() => URL.revokeObjectURL(url), 10000);
+              }}
+            >
+              Zálohovat místní zápisy
+            </button>
             {drafts.length > 0 && (
               <div className="draft-list">
                 {drafts.map((d) => (
@@ -1618,8 +1847,31 @@ function App() {
                         }
                         try {
                           if (supabase) {
-                            const savedId = await saveRemote(d);
-                            await finishRemote({ ...d, id: savedId || d.id });
+                            const fresh = await loadRemote();
+                            const recovery = recoverDraft(
+                              d,
+                              fresh.workouts.find(
+                                (w) => w.user === d.user && w.round === d.round,
+                              ),
+                              fresh.exercises,
+                            );
+                            if (recovery.conflicts)
+                              throw Error(
+                                "Koncept se liší od online dat. Nejprve zkontrolujte a upravte rozdílné série.",
+                              );
+                            queue.current!.enqueue(
+                              recovery.workout,
+                              recovery.changes,
+                            );
+                            await queue.current!.flush();
+                            if (queue.current!.pending().length)
+                              throw Error("Část sérií stále čeká na odeslání.");
+                            const saved = (await loadRemote()).workouts.find(
+                              (w) => w.user === d.user && w.round === d.round,
+                            );
+                            if (!saved)
+                              throw Error("Server nepotvrdil trénink.");
+                            await finishRemote(saved);
                             await refresh(person);
                           } else {
                             setWorkouts((ws) => [

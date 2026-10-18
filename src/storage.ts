@@ -1,6 +1,7 @@
+/// <reference types="vite/client" />
 import { createClient } from "@supabase/supabase-js";
 import type { Exercise, Workout, Person } from "./domain";
-const env = (import.meta as unknown as { env: Record<string, string> }).env;
+const env = import.meta.env;
 export const supabase =
   env.VITE_SUPABASE_URL && env.VITE_SUPABASE_ANON_KEY
     ? createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY)
@@ -17,13 +18,26 @@ export function persist(key: string, value: unknown) {
 }
 export async function loadRemote() {
   if (!supabase) throw Error("Supabase není připojen.");
+  const signal = AbortSignal.timeout(20000);
   const [p, e, w, c] = await Promise.all([
-    supabase.from("profiles").select("*"),
-    supabase.from("exercises").select("*"),
-    supabase.from("workouts").select("*, workout_exercises(*, sets(*))"),
-    supabase.from("cycle").select("*").single(),
+    supabase.from("profiles").select("*").abortSignal(signal),
+    supabase.from("exercises").select("*").abortSignal(signal),
+    supabase
+      .from("workouts")
+      .select("*, workout_exercises(*, sets(*))")
+      .abortSignal(signal),
+    supabase
+      .from("cycle")
+      .select("*")
+      .eq("id", true)
+      .abortSignal(signal)
+      .maybeSingle(),
   ]);
   for (const r of [p, e, w, c]) if (r.error) throw r.error;
+  if (!c.data)
+    throw Error(
+      "Společný cyklus není dostupný. Ověřte přihlášený účet, propojení profiles.auth_user_id a RLS; lokální zápisy zůstávají zachovány.",
+    );
   return {
     profiles: p.data!,
     exercises: e.data!.map((e) => ({
@@ -56,7 +70,9 @@ export async function saveRemote(w: Workout) {
   if (!supabase) return;
   const { data, error } = await supabase.rpc("save_workout", { payload: w });
   if (error) throw error;
-  return data as string;
+  if (typeof data !== "string" || !data)
+    throw Error("Server nepotvrdil ID uloženého tréninku.");
+  return data;
 }
 export async function finishRemote(w: Workout) {
   if (!supabase) return;
@@ -83,12 +99,19 @@ export async function saveExercise(e: Exercise) {
   return { ...e, photo };
 }
 
-export async function savePatch(job: import("./autosave").PendingSave) {
+export async function savePatch(
+  job: import("./autosave").PendingSave,
+  honzaPlan?: string[],
+) {
   if (!supabase) throw Error("Supabase není připojen.");
-  const { data, error } = await supabase.rpc("save_workout_patch", {
-    payload: job.workout,
-    changes: job.changes,
-  });
+  const { data, error } = await supabase
+    .rpc("save_workout_patch", {
+      payload: { ...job.workout, honzaPlan },
+      changes: job.changes,
+    })
+    .abortSignal(AbortSignal.timeout(20000));
   if (error) throw error;
-  return data as string;
+  if (typeof data !== "string" || !data)
+    throw Error("Server nepotvrdil ID uloženého tréninku.");
+  return data;
 }

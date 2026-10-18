@@ -11,6 +11,7 @@ type Props = {
   exercises: Exercise[];
   previous?: Entry;
   disabled: boolean;
+  selectionDisabled?: boolean;
   onChange: (entry: Entry) => void;
 };
 export function ExerciseCard({
@@ -23,6 +24,7 @@ export function ExerciseCard({
   exercises,
   previous,
   disabled,
+  selectionDisabled = false,
   onChange,
 }: Props) {
   const ex = exercises.find((e) => e.id === entry.exerciseId),
@@ -52,7 +54,7 @@ export function ExerciseCard({
           <span className="muscle-label">{muscle}</span>
           <select
             aria-label={`Cvik ${index + 1}`}
-            disabled={disabled}
+            disabled={disabled || selectionDisabled || person === "David"}
             value={entry.exerciseId}
             onChange={(e) => onChange({ ...entry, exerciseId: e.target.value })}
           >
@@ -70,6 +72,7 @@ export function ExerciseCard({
                 </option>
               ))}
           </select>
+          {person === "David" && <small>Cvik podle Honzy</small>}
           {ex?.note && <small>{ex.note}</small>}
         </div>
         <span className={"status-check " + (complete ? "checked" : "")}>

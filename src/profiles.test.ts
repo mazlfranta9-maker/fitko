@@ -18,6 +18,8 @@ it("Davidův profil funguje před účtem a pozdější přihlášení zachová 
   await db.exec(
     readFileSync("supabase/005_profiles_without_login.sql", "utf8"),
   );
+  await db.exec(readFileSync("supabase/006_sync_repair.sql", "utf8"));
+  await db.exec(readFileSync("supabase/006_sync_repair.sql", "utf8"));
   const before = (
     await db.query<{ id: string; name: string; auth_user_id: string | null }>(
       "select * from profiles order by name",
@@ -71,6 +73,31 @@ it("Davidův profil funguje před účtem a pozdější přihlášení zachová 
   await db.query("select save_workout_patch($1::jsonb,$2::jsonb)", [
     JSON.stringify(payload("David")),
     JSON.stringify(change("20")),
+  ]);
+  // Two devices read the same old snapshot, then independently change fields.
+  const partial = (field: string, weight: string, reps: string) =>
+    change(weight).map((c) => ({ ...c, reps, fields: [field] }));
+  await Promise.all([
+    db.query("select save_workout_patch($1::jsonb,$2::jsonb)", [
+      JSON.stringify(payload("David")),
+      JSON.stringify(partial("weight", "25", "")),
+    ]),
+    db.query("select save_workout_patch($1::jsonb,$2::jsonb)", [
+      JSON.stringify(payload("David")),
+      JSON.stringify(partial("reps", "20", "10")),
+    ]),
+  ]);
+  expect(
+    (
+      await db.query(
+        "select weight,reps from sets s join workout_exercises e on e.id=s.workout_exercise_id join workouts w on w.id=e.workout_id where w.user_id=$1 and e.position=0 and ordinal=1",
+        [david.id],
+      )
+    ).rows,
+  ).toEqual([{ weight: "25.00", reps: 10 }]);
+  await db.query("select save_workout_patch($1::jsonb,$2::jsonb)", [
+    JSON.stringify(payload("David")),
+    JSON.stringify(partial("weight", "20", "10")),
   ]);
   expect((await db.query("select * from workouts")).rows).toHaveLength(2);
   await db.exec("reset role;");
