@@ -288,6 +288,7 @@ function App() {
     target?: Person,
     keepRound?: string,
     forceCurrent = false,
+    preserveView = false,
   ) {
     if (!supabase) return;
     const d = await loadRemote();
@@ -301,7 +302,7 @@ function App() {
     persist(prefix + "verified-owner", me.name);
     const selectedPerson =
       target ?? read<Person>(prefix + "selected-person", me.name as Person);
-    setPerson(selectedPerson);
+    if (!preserveView) setPerson(selectedPerson);
     setAvailablePeople(d.profiles.map((p) => p.name));
     const linked = hasLogin(d.profiles.find((p) => p.name === "David"));
     setDavidLinked(linked);
@@ -313,16 +314,17 @@ function App() {
     setSharedCycle({ day: d.cycle.day, round: d.cycle.round_id });
     setExercises(d.exercises);
     setWorkouts(d.workouts);
-    setCycle(
-      forceCurrent
-        ? { day: d.cycle.day, round: d.cycle.round_id }
-        : sharedRound(
-            d.workouts,
-            { day: d.cycle.day, round: d.cycle.round_id },
-            queue.current!.pending().map((j) => j.workout),
-            keepRound,
-          ),
-    );
+    if (!preserveView)
+      setCycle(
+        forceCurrent
+          ? { day: d.cycle.day, round: d.cycle.round_id }
+          : sharedRound(
+              d.workouts,
+              { day: d.cycle.day, round: d.cycle.round_id },
+              queue.current!.pending().map((j) => j.workout),
+              keepRound,
+            ),
+      );
     if (!restored.current) {
       let conflicts = false;
       for (const draft of read<Workout[]>(prefix + "drafts", [])) {
@@ -366,7 +368,7 @@ function App() {
       if (!active || fetching || document.visibilityState === "hidden") return;
       fetching = true;
       try {
-        await refresh();
+        await refresh(undefined, undefined, false, ready);
       } catch (error) {
         if (active) {
           setSynced(false);
@@ -602,13 +604,15 @@ function App() {
     }
     const turn = nextTurn(workout, partner, exercise, series);
     if (!turn) {
-      notify(
-        `${other} už má všechny série zapsané. Dokončete zbývající série a trénink.`,
-      );
+      notify(`Oba máte tento cvik hotový. Další cvik si vyberte podle sebe.`);
       return;
     }
     setActiveSet({ exercise: turn.exercise, series: turn.series });
-    switchPerson(other);
+    if (turn.person === person)
+      notify(
+        `${other} už má tento cvik hotový. Doplňte vlastní zbývající série.`,
+      );
+    switchPerson(turn.person);
     requestAnimationFrame(() =>
       document
         .getElementById(`set-${turn.exercise}-${turn.series}`)
@@ -1158,6 +1162,23 @@ function App() {
                           : undefined
                       }
                       onPass={(series) => passTurn(index, series)}
+                      onActivate={(series) =>
+                        setActiveSet({ exercise: index, series })
+                      }
+                      partnerDone={validSets(
+                        (
+                          drafts.find(
+                            (w) =>
+                              w.round === workout.round && w.user !== person,
+                          ) ||
+                          workouts.find(
+                            (w) =>
+                              w.round === workout.round && w.user !== person,
+                          )
+                        )?.entries.find(
+                          (e) => e.exerciseId === entry.exerciseId,
+                        )?.sets || [],
+                      )}
                       muscle={plan(cycle.day).slots[index]}
                       exercises={exercises}
                       previous={last(entry.exerciseId, cycle.day)}
@@ -1774,7 +1795,7 @@ function App() {
                 : "Demo: oba profily můžeš upravovat."}
             </p>
             <p>
-              Verze synchronizace: 2026.10.18 · společné cviky. Kolo:{" "}
+              Verze synchronizace: 2026.10.25 · volné pořadí cviků. Kolo:{" "}
               {cycle.round}
               <br />
               {online ? "Telefon je online." : "Telefon je offline."}{" "}

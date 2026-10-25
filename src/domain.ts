@@ -163,18 +163,25 @@ export function nextTurn(
   exercise: number,
   series: number,
 ) {
+  const target = current.entries[exercise];
+  if (!target || !target.sets[series]) return null;
   const nextPerson: Person = current.user === "Honza" ? "David" : "Honza";
-  const total = current.entries.length * 3;
-  for (let offset = 0; offset < total; offset++) {
-    const flat = (exercise * 3 + series + offset) % total,
-      position = Math.floor(flat / 3),
-      index = flat % 3;
-    const target = current.entries[position];
-    const previous = partner?.entries.find(
-      (e) => e.exerciseId === target.exerciseId,
-    )?.sets[index];
-    if (!previous || !validSets([previous, previous, previous]))
-      return { person: nextPerson, exercise: position, series: index };
+  const partnerSets = partner?.entries.find(
+    (e) => e.exerciseId === target.exerciseId,
+  )?.sets;
+  // The visible plan is a list, not an enforced order of execution. Handoffs
+  // must stay with the exercise the users chose, even when later cards are empty.
+  for (let offset = 0; offset < target.sets.length; offset++) {
+    const index = (series + offset) % target.sets.length;
+    const set = partnerSets?.[index];
+    if (!set || !validSets([set, set, set]))
+      return { person: nextPerson, exercise, series: index };
+  }
+  for (let offset = 1; offset <= target.sets.length; offset++) {
+    const index = (series + offset) % target.sets.length;
+    const set = target.sets[index];
+    if (!validSets([set, set, set]))
+      return { person: current.user, exercise, series: index };
   }
   return null;
 }
