@@ -542,7 +542,7 @@ main {
 }
 .muscle-label {
   display: block;
-  font-size: 8px;
+  font-size: 14px;
   color: var(--accent);
   letter-spacing: 1.1px;
   text-transform: uppercase;
@@ -1356,7 +1356,7 @@ h4 {
     font-size: 13px;
   }
   .muscle-label {
-    font-size: 7px;
+    font-size: 13px;
   }
   .status-check {
     font-size: 8px;
