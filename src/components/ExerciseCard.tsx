@@ -132,7 +132,7 @@ export function ExerciseCard({
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
-                  onPass(i);
+                  if (!e.repeat) onPass(i);
                 }
               }}
             />
