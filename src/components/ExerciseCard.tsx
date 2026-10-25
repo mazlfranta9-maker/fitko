@@ -5,6 +5,8 @@ type Props = {
   person: import("../domain").Person;
   activeSet?: number;
   onPass: (series: number) => void;
+  onActivate?: (series: number) => void;
+  partnerDone?: boolean;
   entry: Entry;
   index: number;
   muscle: string;
@@ -20,6 +22,8 @@ export function ExerciseCard({
   person,
   activeSet,
   onPass,
+  onActivate,
+  partnerDone = false,
   muscle,
   exercises,
   previous,
@@ -106,6 +110,7 @@ export function ExerciseCard({
               placeholder="—"
               value={s.weight}
               disabled={disabled}
+              onFocus={() => onActivate?.(i)}
               onChange={(e) => changeSet(i, "weight", e.target.value)}
             />
             <input
@@ -114,6 +119,7 @@ export function ExerciseCard({
               placeholder="—"
               value={s.reps}
               disabled={disabled}
+              onFocus={() => onActivate?.(i)}
               onChange={(e) => changeSet(i, "reps", e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
@@ -131,10 +137,16 @@ export function ExerciseCard({
               <button
                 className="pass-turn"
                 onClick={() => onPass(i)}
-                aria-label={`Zapsat sérii ${i + 1} cviku ${index + 1} a předat ${person === "Honza" ? "Davidovi" : "Honzovi"}`}
+                aria-label={
+                  partnerDone
+                    ? `Potvrdit sérii ${i + 1} cviku ${index + 1}`
+                    : `Zapsat sérii ${i + 1} cviku ${index + 1} a předat ${person === "Honza" ? "Davidovi" : "Honzovi"}`
+                }
               >
                 ✓ Zapsat sérii {i + 1} ·{" "}
-                {person === "Honza" ? "David" : "Honza"} →
+                {partnerDone
+                  ? "Potvrdit"
+                  : `${person === "Honza" ? "David" : "Honza"} →`}
               </button>
             )}
           </div>
