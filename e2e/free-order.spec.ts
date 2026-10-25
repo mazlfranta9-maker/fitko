@@ -179,8 +179,15 @@ test("Honza má zvolený cvik hotový: David dopíše vlastní série bez přesk
   page,
 }) => {
   await transport(page);
-  for (let series = 0; series < 3; series++)
+  for (let series = 0; series < 3; series++) {
     await write(page, 7, series, String(50 + series));
+    await pass(page, 7, series);
+    if (series < 2)
+      await page
+        .locator(".person-switch button")
+        .filter({ hasText: "Honza" })
+        .click();
+  }
   await page
     .locator(".person-switch button")
     .filter({ hasText: "David" })
@@ -204,4 +211,83 @@ test("Honza má zvolený cvik hotový: David dopíše vlastní série bez přesk
     await expect(
       row(page, 7, series).locator("input[inputmode=decimal]"),
     ).toHaveValue(String(30 + series));
+});
+
+test("předvyplnění všech tří sérií oběma zachová běžné střídání i po reloadu", async ({
+  page,
+}) => {
+  const { records } = await transport(page);
+  for (let series = 0; series < 3; series++)
+    await write(page, 7, series, String(50 + series));
+  await page
+    .locator(".person-switch button")
+    .filter({ hasText: "David" })
+    .click();
+  for (let series = 0; series < 3; series++)
+    await write(page, 7, series, String(30 + series));
+  await page
+    .locator(".person-switch button")
+    .filter({ hasText: "Honza" })
+    .click();
+  for (let series = 0; series < 3; series++) {
+    await pass(page, 7, series);
+    await expect(page.locator(".editing-banner strong")).toHaveText("David");
+    await expect(row(page, 7, series)).toHaveClass(/active-set/);
+    await expect(
+      row(page, 7, series).locator("input[inputmode=decimal]"),
+    ).toHaveValue(String(30 + series));
+    await pass(page, 7, series);
+    await expect(page.locator(".editing-banner strong")).toHaveText(
+      series === 2 ? "David" : "Honza",
+    );
+    await expect(row(page, 7, series === 2 ? 2 : series + 1)).toHaveClass(
+      /active-set/,
+    );
+    if (series === 0) {
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            JSON.parse(localStorage.getItem("fitlog-online-outbox") || "{}"),
+          ),
+        )
+        .toEqual({});
+      await page.reload();
+      await expect(page.locator(".editing-banner strong")).toHaveText("Honza");
+      await expect(row(page, 7, 1)).toHaveClass(/active-set/);
+    }
+  }
+  await expect(
+    page.getByRole("status").filter({ hasText: "Oba máte tento cvik hotový" }),
+  ).toBeVisible();
+  expect(
+    records
+      .find((w) => w.user === "Honza")!
+      .entries[7].sets.map((s) => s.weight),
+  ).toEqual(["50", "51", "52"]);
+  expect(
+    records
+      .find((w) => w.user === "David")!
+      .entries[7].sets.map((s) => s.weight),
+  ).toEqual(["30", "31", "32"]);
+});
+
+test("jen Honza předvyplněný: Enter dál střídá běžně a podržení nepotvrdí partnera", async ({
+  page,
+}) => {
+  await transport(page);
+  for (let series = 0; series < 3; series++)
+    await write(page, 7, series, String(50 + series));
+  await row(page, 7, 0).locator("input[inputmode=numeric]").press("Enter");
+  await expect(page.locator(".editing-banner strong")).toHaveText("David");
+  await write(page, 7, 0, "30");
+  await row(page, 7, 0)
+    .locator("input[inputmode=numeric]")
+    .dispatchEvent("keydown", { key: "Enter", repeat: true });
+  await expect(page.locator(".editing-banner strong")).toHaveText("David");
+  await row(page, 7, 0).locator("input[inputmode=numeric]").press("Enter");
+  await expect(page.locator(".editing-banner strong")).toHaveText("Honza");
+  await expect(row(page, 7, 1)).toHaveClass(/active-set/);
+  await pass(page, 7, 1);
+  await expect(page.locator(".editing-banner strong")).toHaveText("David");
+  await expect(row(page, 7, 1)).toHaveClass(/active-set/);
 });

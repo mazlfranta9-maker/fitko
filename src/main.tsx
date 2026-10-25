@@ -31,6 +31,9 @@ import {
   selected,
   arrangeEntries,
   nextTurn,
+  confirmationKey,
+  exerciseConfirmed,
+  type SeriesConfirmations,
   validSets,
   volume,
   kg,
@@ -95,6 +98,11 @@ function App() {
   const [activeSet, setActiveSet] = useState(() =>
     read(prefix + "active-set", { exercise: 0, series: 0 }),
   );
+  const [confirmations, setConfirmations] = useState<SeriesConfirmations>(() =>
+    read(prefix + "series-confirmations", {}),
+  );
+  const confirmationsRef = useRef(confirmations);
+  confirmationsRef.current = confirmations;
   const [syncStatus, setSyncStatus] = useState("");
   const restored = useRef(false);
   const previousRound = useRef(cycle.round);
@@ -564,12 +572,28 @@ function App() {
     setPerson(p);
   };
   const passTurn = (exercise: number, series: number) => {
+    if (!editable || workout.completed || shared.conflict) return;
     const entry = workout.entries[exercise],
       set = entry.sets[series];
     if (!validSets([set, set, set])) {
       notify("Nejprve vyplňte platnou váhu a počet opakování této série.");
       return;
     }
+    const nextConfirmations: SeriesConfirmations = {
+      ...confirmationsRef.current,
+      [confirmationKey(workout, entry.exerciseId, series)]: true,
+    };
+    try {
+      persist(prefix + "series-confirmations", nextConfirmations);
+    } catch {
+      notify(
+        "Postup střídání se nepodařilo uložit do zařízení. Hodnoty série zůstávají zachované.",
+      );
+      return;
+    }
+    confirmationsRef.current = nextConfirmations;
+    setConfirmations(nextConfirmations);
+    if (supabase) void queue.current!.flush();
     const other: Person = person === "Honza" ? "David" : "Honza";
     let partner =
       drafts.find((w) => w.user === other && w.round === cycle.round) ||
@@ -607,7 +631,13 @@ function App() {
         changed!,
       ]);
     }
-    const turn = nextTurn(workout, partner, exercise, series);
+    const turn = nextTurn(
+      workout,
+      partner,
+      exercise,
+      series,
+      nextConfirmations,
+    );
     if (!turn) {
       notify(`Oba máte tento cvik hotový. Další cvik si vyberte podle sebe.`);
       return;
@@ -1245,19 +1275,16 @@ function App() {
                       onActivate={(series) =>
                         setActiveSet({ exercise: index, series })
                       }
-                      partnerDone={validSets(
-                        (
-                          drafts.find(
-                            (w) =>
-                              w.round === workout.round && w.user !== person,
-                          ) ||
+                      partnerDone={exerciseConfirmed(
+                        drafts.find(
+                          (w) => w.round === workout.round && w.user !== person,
+                        ) ||
                           workouts.find(
                             (w) =>
                               w.round === workout.round && w.user !== person,
-                          )
-                        )?.entries.find(
-                          (e) => e.exerciseId === entry.exerciseId,
-                        )?.sets || [],
+                          ),
+                        entry.exerciseId,
+                        confirmations,
                       )}
                       muscle={plan(cycle.day).slots[index]}
                       exercises={exercises}
@@ -1867,7 +1894,7 @@ function App() {
                 : "Demo: oba profily můžeš upravovat."}
             </p>
             <p>
-              Verze synchronizace: 2026.10.25 · volné pořadí cviků. Kolo:{" "}
+              Verze synchronizace: 2026.10.25 · předvyplnění a volné pořadí. Kolo:{" "}
               {cycle.round}
               <br />
               {online ? "Telefon je online." : "Telefon je offline."}{" "}

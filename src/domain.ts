@@ -157,11 +157,52 @@ export function arrangeEntries(
   return result;
 }
 
+// Confirmation is a local navigation cue, separate from autosaved set values.
+export type SeriesConfirmations = Record<string, true>;
+export function confirmationKey(
+  workout: Pick<Workout, "round" | "user">,
+  exerciseId: string,
+  series: number,
+) {
+  return JSON.stringify([workout.round, workout.user, exerciseId, series]);
+}
+export function seriesConfirmed(
+  workout: Workout | undefined,
+  exerciseId: string,
+  series: number,
+  confirmations: SeriesConfirmations,
+) {
+  const set = workout?.entries.find((e) => e.exerciseId === exerciseId)?.sets[
+    series
+  ];
+  return (
+    !!workout &&
+    !!set &&
+    validSets([set, set, set]) &&
+    confirmations[confirmationKey(workout, exerciseId, series)] === true
+  );
+}
+export function exerciseConfirmed(
+  workout: Workout | undefined,
+  exerciseId: string,
+  confirmations: SeriesConfirmations,
+) {
+  const entry = workout?.entries.find((e) => e.exerciseId === exerciseId);
+  return (
+    !!entry &&
+    entry.sets.length === 3 &&
+    entry.sets.every((_, index) =>
+      seriesConfirmed(workout, exerciseId, index, confirmations),
+    )
+  );
+}
+
 export function nextTurn(
   current: Workout,
   partner: Workout | undefined,
   exercise: number,
   series: number,
+  confirmations?: SeriesConfirmations,
 ) {
   const target = current.entries[exercise];
   if (!target || !target.sets[series]) return null;
@@ -174,13 +215,21 @@ export function nextTurn(
   for (let offset = 0; offset < target.sets.length; offset++) {
     const index = (series + offset) % target.sets.length;
     const set = partnerSets?.[index];
-    if (!set || !validSets([set, set, set]))
+    if (
+      confirmations
+        ? !seriesConfirmed(partner, target.exerciseId, index, confirmations)
+        : !set || !validSets([set, set, set])
+    )
       return { person: nextPerson, exercise, series: index };
   }
   for (let offset = 1; offset <= target.sets.length; offset++) {
     const index = (series + offset) % target.sets.length;
     const set = target.sets[index];
-    if (!validSets([set, set, set]))
+    if (
+      confirmations
+        ? !seriesConfirmed(current, target.exerciseId, index, confirmations)
+        : !validSets([set, set, set])
+    )
       return { person: current.user, exercise, series: index };
   }
   return null;
