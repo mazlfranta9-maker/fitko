@@ -15,6 +15,7 @@ type Props = {
   disabled: boolean;
   selectionDisabled?: boolean;
   onChange: (entry: Entry) => void;
+  onAdd?: () => void;
 };
 export function ExerciseCard({
   entry,
@@ -30,6 +31,7 @@ export function ExerciseCard({
   disabled,
   selectionDisabled = false,
   onChange,
+  onAdd,
 }: Props) {
   const ex = exercises.find((e) => e.id === entry.exerciseId),
     complete = validSets(entry.sets);
@@ -60,7 +62,10 @@ export function ExerciseCard({
             aria-label={`Cvik ${index + 1}`}
             disabled={disabled || selectionDisabled || person === "David"}
             value={entry.exerciseId}
-            onChange={(e) => onChange({ ...entry, exerciseId: e.target.value })}
+            onChange={(e) => {
+              if (e.target.value === "__add_exercise__") onAdd?.();
+              else onChange({ ...entry, exerciseId: e.target.value });
+            }}
           >
             <option value="">Vyberte cvik</option>
             {exercises
@@ -75,6 +80,9 @@ export function ExerciseCard({
                   {e.archived ? " (archiv)" : ""}
                 </option>
               ))}
+            {onAdd && person === "Honza" && (
+              <option value="__add_exercise__">+ Přidat cvik</option>
+            )}
           </select>
           {person === "David" && <small>Cvik podle Honzy</small>}
           {ex?.note && <small>{ex.note}</small>}
