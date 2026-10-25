@@ -278,6 +278,11 @@ function App() {
     [filterDay, setFilterDay] = useState(""),
     [from, setFrom] = useState(""),
     [to, setTo] = useState("");
+  const [exerciseTarget, setExerciseTarget] = useState<{
+    workout: Workout;
+    position: number;
+    exerciseId: string;
+  } | null>(null);
   const [editing, setEditing] = useState<Exercise | null>(null),
     [progressId, setProgressId] = useState(seedExercises[0].id),
     [progressType, setProgressType] = useState("Lehký");
@@ -540,9 +545,9 @@ function App() {
     syncStatus === "Uloženo online" && !isConfirmed
       ? "Místní zápis · zkontrolujte synchronizaci"
       : syncStatus;
-  const update = (w: Workout) => {
+  const update = (w: Workout, before: Workout = workout) => {
     if (!editable || w.completed || shared.conflict) return;
-    const changes = changedSets(workout, w);
+    const changes = changedSets(before, w);
     setDrafts((ds) => {
       const next = [
         ...ds.filter((d) => !(d.user === w.user && d.round === w.round)),
@@ -780,6 +785,17 @@ function App() {
     a.click();
     URL.revokeObjectURL(a.href);
   }
+  function newExercise(muscle = "Prsa", target: typeof exerciseTarget = null) {
+    setExerciseTarget(target);
+    setEditing({
+      id: uid(),
+      name: "",
+      muscle,
+      note: "",
+      photo: "",
+      archived: false,
+    });
+  }
   async function commitExercise(e: Exercise) {
     if (!e.name.trim()) {
       notify("Vyplňte název cviku.");
@@ -790,7 +806,61 @@ function App() {
       const saved = (await saveExercise(e)) || e;
       setExercises((es) => [...es.filter((x) => x.id !== e.id), saved]);
       setEditing(null);
-      notify("Cvik uložen.");
+      setExerciseTarget(null);
+      if (exerciseTarget) {
+        const target = exerciseTarget;
+        const storedWorkout =
+          [...snapshots.current.drafts, ...snapshots.current.workouts].find(
+            (w) => w.user === "Honza" && w.round === target.workout.round,
+          ) || target.workout;
+        const latest = storedWorkout.entries.length
+          ? storedWorkout
+          : { ...storedWorkout, entries: target.workout.entries };
+        const entries = arrangeEntries(latest.day, latest.entries, [
+          ...exercisesRef.current,
+          saved,
+        ]);
+        const entry = entries[target.position];
+        const partnerHasResults = [
+          ...snapshots.current.drafts,
+          ...snapshots.current.workouts,
+        ].some(
+          (w) =>
+            w.user === "David" &&
+            w.round === latest.round &&
+            w.entries.some(
+              (e) =>
+                e.exerciseId === target.exerciseId &&
+                e.sets.some((s) => s.weight !== "" || s.reps !== ""),
+            ),
+        );
+        if (
+          person === "Honza" &&
+          cycle.round === latest.round &&
+          !latest.completed &&
+          !saved.archived &&
+          saved.muscle === plan(latest.day).slots[target.position] &&
+          entry?.exerciseId === target.exerciseId &&
+          entry.sets.every((s) => s.weight === "" && s.reps === "") &&
+          !partnerHasResults
+        ) {
+          const before = { ...latest, entries };
+          const changed = structuredClone(before);
+          changed.entries[target.position] = {
+            ...changed.entries[target.position],
+            exerciseId: saved.id,
+          };
+          exercisesRef.current = [
+            ...exercisesRef.current.filter((x) => x.id !== saved.id),
+            saved,
+          ];
+          update(changed, before);
+          notify("Cvik uložen a vybrán v tréninku.");
+        } else
+          notify(
+            "Cvik uložen do knihovny. Výběr v tréninku zůstal zachovaný, protože se změnil kontext, partie nebo už obsahuje série.",
+          );
+      } else notify("Cvik uložen.");
     } catch (err) {
       notify("Cvik nebyl uložen: " + (err as Error).message);
     } finally {
@@ -1162,6 +1232,16 @@ function App() {
                           : undefined
                       }
                       onPass={(series) => passTurn(index, series)}
+                      onAdd={
+                        person === "Honza"
+                          ? () =>
+                              newExercise(plan(workout.day).slots[index], {
+                                workout: structuredClone(workout),
+                                position: index,
+                                exerciseId: entry.exerciseId,
+                              })
+                          : undefined
+                      }
                       onActivate={(series) =>
                         setActiveSet({ exercise: index, series })
                       }
@@ -1477,18 +1557,7 @@ function App() {
                   Knihovna cviků{" "}
                   <span>{exercises.filter((e) => !e.archived).length}</span>
                 </h2>
-                <button
-                  onClick={() =>
-                    setEditing({
-                      id: uid(),
-                      name: "",
-                      muscle: "Prsa",
-                      note: "",
-                      photo: "",
-                      archived: false,
-                    })
-                  }
-                >
+                <button onClick={() => newExercise()}>
                   <Plus size={18} /> Přidat cvik
                 </button>
               </div>
@@ -1521,7 +1590,10 @@ function App() {
                         "library-card " + (e.archived ? "archived" : "")
                       }
                       key={e.id}
-                      onClick={() => setEditing(e)}
+                      onClick={() => {
+                        setExerciseTarget(null);
+                        setEditing(e);
+                      }}
                     >
                       <div className="library-image">
                         {e.photo ? (
@@ -1962,7 +2034,11 @@ function App() {
                 type="button"
                 className="icon-button"
                 aria-label="Zavřít"
-                onClick={() => setEditing(null)}
+                disabled={busy}
+                onClick={() => {
+                  setExerciseTarget(null);
+                  setEditing(null);
+                }}
               >
                 <X />
               </button>
