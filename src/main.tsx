@@ -57,6 +57,7 @@ import { profileForAccount, hasLogin } from "./profiles";
 import { AutosaveQueue, changedSets, type PendingSave } from "./autosave";
 import { ManagementHelp } from "./components/ManagementHelp";
 import { ExerciseCard } from "./components/ExerciseCard";
+import { ALL_PROGRESS_MUSCLES, filterProgressExercises, selectedProgressExerciseId } from "./progress-filter";
 import { deletionBlockReason } from "./exercise-deletion";
 const uid = (): string => crypto.randomUUID();
 const fmt = (n: number) =>
@@ -294,8 +295,11 @@ function App() {
     exerciseId: string;
   } | null>(null);
   const [editing, setEditing] = useState<Exercise | null>(null),
+    [progressMuscle, setProgressMuscle] = useState(ALL_PROGRESS_MUSCLES),
     [progressId, setProgressId] = useState(seedExercises[0].id),
     [progressType, setProgressType] = useState("Lehký");
+  const progressExercises = filterProgressExercises(exercises, progressMuscle);
+  const activeProgressId = selectedProgressExerciseId(progressId, progressExercises);
   const notify = (s: string) => {
     setMessage(s);
   };
@@ -1683,24 +1687,48 @@ function App() {
           )}
           {tab === "Progres" && (
             <>
-              <div className="filters">
-                <select
-                  value={progressId}
-                  onChange={(e) => setProgressId(e.target.value)}
-                >
-                  {exercises.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.name}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={progressType}
+              <div className="filters progress-filters">
+                <label>
+                  Svalová partie
+                  <select
+                    aria-label="Svalová partie pro progres"
+                    value={progressMuscle}
+                    onChange={(e) => {
+                      const nextMuscle = e.target.value;
+                      setProgressMuscle(nextMuscle);
+                      const nextExercises = filterProgressExercises(exercises, nextMuscle);
+                      setProgressId(selectedProgressExerciseId(progressId, nextExercises));
+                    }}
+                  >
+                    {[ALL_PROGRESS_MUSCLES, ...muscles].map((muscle) => (
+                      <option key={muscle} value={muscle}>{muscle}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Cvik
+                  <select
+                    aria-label="Cvik pro progres"
+                    value={activeProgressId}
+                    disabled={!progressExercises.length}
+                    onChange={(e) => setProgressId(e.target.value)}
+                  >
+                    {!progressExercises.length && <option value="">Žádné cviky</option>}
+                    {progressExercises.map((e) => (
+                      <option key={e.id} value={e.id}>{e.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Typ tréninku
+                  <select
+                    value={progressType}
                   onChange={(e) => setProgressType(e.target.value)}
                 >
                   <option>Lehký</option>
                   <option>Těžký</option>
-                </select>
+                  </select>
+                </label>
               </div>
               {(["Honza", "David"] as Person[]).map((p) => {
                 const ws = workouts
@@ -1709,12 +1737,12 @@ function App() {
                       w.user === p &&
                       w.completed &&
                       typeOf(w.day) === progressType &&
-                      w.entries.some((e) => e.exerciseId === progressId),
+                      w.entries.some((e) => e.exerciseId === activeProgressId),
                   )
                   .sort((a, b) => a.date.localeCompare(b.date));
                 const data = ws.map((w) => ({
                   date: w.date,
-                  sets: w.entries.find((e) => e.exerciseId === progressId)!
+                  sets: w.entries.find((e) => e.exerciseId === activeProgressId)!
                     .sets,
                 }));
                 return (
