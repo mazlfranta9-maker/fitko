@@ -1656,16 +1656,19 @@ function App() {
                         setEditing(e);
                       }}
                     >
-                      <div className="library-image">
+                      <div className={"library-image" + (e.photo ? " has-photo" : "")}>
                         {e.photo ? (
                           <img src={e.photo} alt={e.name} />
                         ) : (
                           <Dumbbell size={50} />
                         )}
                         <span>{e.muscle}</span>
+                        {e.photo && (
+                          <strong className="library-photo-title">{e.name}</strong>
+                        )}
                       </div>
                       <div>
-                        <h3>{e.name}</h3>
+                        {!e.photo && <h3>{e.name}</h3>}
                         <p>
                           {e.archived
                             ? "Archivováno"
