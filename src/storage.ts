@@ -115,3 +115,13 @@ export async function savePatch(
     throw Error("Server nepotvrdil ID uloženého tréninku.");
   return data;
 }
+
+// Trvalé smazání je povolené pouze cvikům bez historických výsledků.
+export async function deleteExerciseRemote(id: string): Promise<void> {
+  if (!supabase) return;
+  const { data, error } = await supabase.rpc("delete_unused_exercise", {
+    target_exercise_id: id,
+  });
+  if (error) throw error;
+  if (data !== true) throw Error("Server nepotvrdil smazání cviku.");
+}
