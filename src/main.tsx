@@ -47,6 +47,7 @@ import {
   saveRemote,
   finishRemote,
   saveExercise,
+  deleteExerciseRemote,
   savePatch,
 } from "./storage";
 import "./style.css";
@@ -56,6 +57,7 @@ import { profileForAccount, hasLogin } from "./profiles";
 import { AutosaveQueue, changedSets, type PendingSave } from "./autosave";
 import { ManagementHelp } from "./components/ManagementHelp";
 import { ExerciseCard } from "./components/ExerciseCard";
+import { deletionBlockReason } from "./exercise-deletion";
 const uid = (): string => crypto.randomUUID();
 const fmt = (n: number) =>
   n.toLocaleString("cs-CZ", { maximumFractionDigits: 1 });
@@ -893,6 +895,38 @@ function App() {
       } else notify("Cvik uložen.");
     } catch (err) {
       notify("Cvik nebyl uložen: " + (err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function deleteExercise(e: Exercise) {
+    const reason = deletionBlockReason(
+      e,
+      exercisesRef.current,
+      [
+        ...snapshots.current.workouts,
+        ...snapshots.current.drafts,
+        ...queue.current!.pending().map((job) => job.workout),
+      ],
+    );
+    if (reason) {
+      notify(reason);
+      return;
+    }
+    if (
+      !window.confirm(
+        `Opravdu trvale smazat cvik „${e.name}“? Tuto akci nelze vrátit.`,
+      )
+    ) return;
+    setBusy(true);
+    try {
+      await deleteExerciseRemote(e.id);
+      setExercises((es) => es.filter((x) => x.id !== e.id));
+      setEditing(null);
+      setExerciseTarget(null);
+      notify("Cvik byl smazán z knihovny.");
+    } catch (err) {
+      notify("Cvik nebyl smazán: " + (err as Error).message);
     } finally {
       setBusy(false);
     }
@@ -2145,6 +2179,16 @@ function App() {
               />
             </label>
             <button disabled={busy}>Uložit cvik</button>
+            {exercises.some((e) => e.id === editing.id) && (
+              <button
+                type="button"
+                className="exercise-delete-button"
+                disabled={busy}
+                onClick={() => void deleteExercise(editing)}
+              >
+                Smazat cvik
+              </button>
+            )}
           </form>
         </div>
       )}
