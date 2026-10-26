@@ -1722,3 +1722,15 @@ h4 {
 .exercise-delete-button:hover:not(:disabled) {
   background: #4b2323;
 }
+
+/* Progres: nejprve partie, potom její cviky a typ tréninku. */
+.progress-filters { align-items: flex-end; }
+.progress-filters > label { width: min(260px, 100%); max-width: none; min-width: 0; }
+.progress-filters > label:nth-child(2) { width: min(340px, 100%); }
+.progress-filters > label:nth-child(3) { width: min(150px, 100%); }
+.progress-filters label select { width: 100%; }
+@media (max-width: 650px) {
+  .progress-filters > label,
+  .progress-filters > label:nth-child(2),
+  .progress-filters > label:nth-child(3) { width: 100%; max-width: none; flex: 1 1 100%; }
+}
