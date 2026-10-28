@@ -135,6 +135,25 @@ export async function loadNextTraining(): Promise<string | null> {
 }
 export async function saveNextTraining(nextAt: string | null): Promise<void> {
   if (!supabase) throw Error("Supabase není připojen.");
-  const { error } = await supabase.from("training_schedule").update({ next_at: nextAt, updated_at: new Date().toISOString() }).eq("id", true);
-  if (error) throw error;
+  const { data, error } = await supabase
+    .from("training_schedule")
+    .update({ next_at: nextAt, updated_at: new Date().toISOString() })
+    .eq("id", true)
+    .select("next_at")
+    .single();
+  if (error) {
+    if (error.code === "42P01" || error.code === "PGRST205")
+      throw Error("Chybí databázová tabulka termínů. Nejdříve spusťte SQL aktualizaci 007_training_schedule.sql v Supabase.");
+    if (error.code === "PGRST116")
+      throw Error("Server nepotvrdil uložení termínu. Ověřte aktualizaci 007 a oprávnění přihlášeného účtu.");
+    throw error;
+  }
+  const returned = data?.next_at ?? null;
+  if (
+    !data ||
+    (nextAt === null
+      ? returned !== null
+      : returned === null || Date.parse(returned) !== Date.parse(nextAt))
+  )
+    throw Error("Server nepotvrdil uložený termín. Data v aplikaci neměníme.");
 }
