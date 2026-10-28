@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import {
   Dumbbell,
   History,
+  CalendarDays,
   TrendingUp,
   Library,
   Settings,
@@ -49,6 +50,8 @@ import {
   saveExercise,
   deleteExerciseRemote,
   savePatch,
+  loadNextTraining,
+  saveNextTraining,
 } from "./storage";
 import "./style.css";
 import { followHonza, sharedRound } from "./shared-plan";
@@ -59,6 +62,7 @@ import { ManagementHelp } from "./components/ManagementHelp";
 import { ExerciseCard } from "./components/ExerciseCard";
 import { ALL_PROGRESS_MUSCLES, filterProgressExercises, selectedProgressExerciseId } from "./progress-filter";
 import { deletionBlockReason } from "./exercise-deletion";
+import { trainingDays, trainingTotals, czechTrainingDate, czechTrainingDateTime, pragueLocalToIso, pragueTimeParts } from "./calendar";
 const uid = (): string => crypto.randomUUID();
 const fmt = (n: number) =>
   n.toLocaleString("cs-CZ", { maximumFractionDigits: 1 });
@@ -98,6 +102,11 @@ function App() {
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false),
     [online, setOnline] = useState(navigator.onLine);
+  const [nextTraining, setNextTraining] = useState<string | null>(() => read(prefix + "next-training", null));
+  const [scheduleDate, setScheduleDate] = useState("");
+  const [scheduleTime, setScheduleTime] = useState("18:00");
+  const [scheduleBusy, setScheduleBusy] = useState(false);
+  const [scheduleMessage, setScheduleMessage] = useState("");
   const [activeSet, setActiveSet] = useState(() =>
     read(prefix + "active-set", { exercise: 0, series: 0 }),
   );
@@ -300,6 +309,42 @@ function App() {
     [progressType, setProgressType] = useState("Lehký");
   const progressExercises = filterProgressExercises(exercises, progressMuscle);
   const activeProgressId = selectedProgressExerciseId(progressId, progressExercises);
+  const daysTrained = trainingDays(workouts);
+  const totalsTrained = trainingTotals(daysTrained);
+  async function syncSchedule() {
+    if (!supabase) return;
+    const value = await loadNextTraining();
+    setNextTraining(value);
+    persist(prefix + "next-training", value);
+  }
+  useEffect(() => {
+    if (!supabase || !auth || !ready || !online) return;
+    void syncSchedule().catch(() => {});
+    const timer = window.setInterval(() => { void syncSchedule().catch(() => {}); }, 15000);
+    return () => window.clearInterval(timer);
+  }, [auth, ready, online]);
+  async function changeTrainingSchedule(remove = false) {
+    const iso = remove ? null : pragueLocalToIso(scheduleDate, scheduleTime);
+    if (!remove && (!iso || new Date(iso).getTime() <= Date.now())) {
+      setScheduleMessage("Zadejte platné budoucí datum a čas. Čas se řídí Českou republikou.");
+      return;
+    }
+    setScheduleBusy(true);
+    setScheduleMessage("");
+    try {
+      if (supabase) {
+        if (!auth || !ready || !online) throw Error("Pro sdílené plánování je potřeba online připojení.");
+        await saveNextTraining(iso);
+      }
+      setNextTraining(iso);
+      persist(prefix + "next-training", iso);
+      setScheduleMessage(remove ? "Termín zrušen." : supabase ? "Termín uložen online pro oba." : "Termín uložen v demo režimu na tomto zařízení.");
+    } catch (error) {
+      setScheduleMessage("Termín nebyl uložen: " + (error as Error).message);
+    } finally {
+      setScheduleBusy(false);
+    }
+  }
   const notify = (s: string) => {
     setMessage(s);
   };
@@ -1089,6 +1134,7 @@ function App() {
             [Dumbbell, "Trénink"],
             [History, "Historie"],
             [TrendingUp, "Progres"],
+            [CalendarDays, "Kalendář"],
             [Library, "Cviky"],
           ].map(([Icon, name]) => {
             const I = Icon as typeof Dumbbell;
@@ -1174,7 +1220,9 @@ function App() {
                     ? "Každý trénink má svůj příběh."
                     : tab === "Progres"
                       ? "Výsledky, které jsou vidět."
-                      : "Tvoje cviky. Tvůj plán."}
+                      : tab === "Kalendář"
+                        ? "Tréninkový kalendář."
+                        : "Tvoje cviky. Tvůj plán."}
               </h1>
               <p>
                 {tab === "Trénink"
@@ -1183,7 +1231,9 @@ function App() {
                     ? "Všechny série na jednom místě. Vrať se k tomu, co fungovalo."
                     : tab === "Progres"
                       ? "Sleduj všechny tři série a porovnávej stejné typy tréninku."
-                      : "Sestav si knihovnu, která odpovídá tvému tréninku."}
+                      : tab === "Kalendář"
+                        ? "Odcvičené dny a příští společný trénink na jednom místě."
+                        : "Sestav si knihovnu, která odpovídá tvému tréninku."}
               </p>
             </div>
             {tab === "Trénink" && (
@@ -1201,6 +1251,50 @@ function App() {
               </div>
             )}
           </div>
+          {tab === "Kalendář" && (
+            <div className="training-calendar">
+              <section className="calendar-stats">
+                {([{ title: "Tento měsíc", value: totalsTrained.month }, { title: "Tento rok", value: totalsTrained.year }] as const).map(({ title, value }) => (
+                  <div className="calendar-panel" key={title}>
+                    <span className="eyebrow">{title}</span>
+                    <strong className="calendar-big">{value.days}</strong>
+                    <span className="calendar-muted">společných tréninkových dnů</span>
+                    <p>Honza: {value.honza} dní · David: {value.david} dní</p>
+                  </div>
+                ))}
+              </section>
+              <section className="calendar-panel calendar-schedule">
+                <h2>Příští trénink</h2>
+                <p>{nextTraining ? czechTrainingDateTime(nextTraining) : "Zatím není naplánovaný žádný trénink."}</p>
+                <form onSubmit={(event) => { event.preventDefault(); void changeTrainingSchedule(); }}>
+                  <label>Datum
+                    <input type="date" required value={scheduleDate} onChange={(event) => setScheduleDate(event.target.value)} />
+                  </label>
+                  <label>Čas
+                    <input type="time" required value={scheduleTime} onChange={(event) => setScheduleTime(event.target.value)} />
+                  </label>
+                  <button disabled={scheduleBusy} type="submit">Uložit termín</button>
+                  {nextTraining && <button className="secondary" disabled={scheduleBusy} type="button" onClick={() => void changeTrainingSchedule(true)}>Zrušit termín</button>}
+                </form>
+                <small>Čas podle ČR. {supabase ? "Termín se sdílí online mezi Honzou a Davidem." : "Demo ukládá termín pouze do tohoto prohlížeče."}</small>
+                {scheduleMessage && <p role="status">{scheduleMessage}</p>}
+              </section>
+              <section className="calendar-panel">
+                <h2>Odcvičené dny</h2>
+                {!daysTrained.length ? <p>Zatím nejsou žádné dokončené tréninky.</p> : (
+                  <div className="calendar-dates">
+                    {daysTrained.map(day => (
+                      <div className="calendar-date-row" key={day.dateKey}>
+                        <strong>{czechTrainingDate(day.dateKey)}</strong>
+                        <span>{day.participants.join(" + ")}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <small>Počítají se pouze dokončené tréninky. Společný den se započítá jednou.</small>
+              </section>
+            </div>
+          )}
           {tab === "Trénink" && (
             <div className="editing-banner">
               Na řadě: <strong>{person}</strong>
