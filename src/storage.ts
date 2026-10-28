@@ -125,3 +125,16 @@ export async function deleteExerciseRemote(id: string): Promise<void> {
   if (error) throw error;
   if (data !== true) throw Error("Server nepotvrdil smazání cviku.");
 }
+
+// Jediný plánovaný termín pro oba cvičence.
+export async function loadNextTraining(): Promise<string | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.from("training_schedule").select("next_at").eq("id", true).single();
+  if (error) throw error;
+  return data?.next_at ?? null;
+}
+export async function saveNextTraining(nextAt: string | null): Promise<void> {
+  if (!supabase) throw Error("Supabase není připojen.");
+  const { error } = await supabase.from("training_schedule").update({ next_at: nextAt, updated_at: new Date().toISOString() }).eq("id", true);
+  if (error) throw error;
+}
