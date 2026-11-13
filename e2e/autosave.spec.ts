@@ -18,14 +18,14 @@ test("online zapojení fronty odesílá série obou profilů a obnoví offline z
  export function persist(key,value){localStorage.setItem(key,JSON.stringify(value));}
  export async function loadRemote(){return {profiles:[{id:'honza-account',auth_user_id:'honza-account',name:'Honza'},{id:'david-profile',auth_user_id:window.fitlogDavidLinked?'david-account':null,name:'David'}].filter(p=>p.name==='Honza'||window.fitlogDavidProfileExists),exercises:${JSON.stringify(seedExercises)},workouts:clone(records),cycle:{day:1,round_id:'shared-online-round'}};}
  export async function savePatch(job){if(!navigator.onLine)throw Error('Offline');window.fitlogTestWrites.push(clone(job));let w=records.find(w=>w.user===job.workout.user&&w.round===job.workout.round);if(!w){w=clone(job.workout);records.push(w);}for(const c of job.changes)w.entries[c.position].sets[c.ordinal-1]={weight:c.weight,reps:c.reps};return w.id;}
- export async function saveRemote(){} export async function finishRemote(){} export async function saveExercise(e){return e;}
+ export async function loadNextTraining(){return null;} export async function saveNextTraining(){} export async function deleteExerciseRemote(){} export async function saveRemote(){} export async function finishRemote(){} export async function saveExercise(e){return e;}
  `,
     }),
   );
   await page.goto("/");
   await expect(page.locator(".editing-banner strong")).toHaveText("Honza");
-  const weights = page.locator("input[inputmode=decimal]"),
-    reps = page.locator("input[inputmode=numeric]");
+  let weights = page.locator(".person-honza input[inputmode=decimal]"),
+    reps = page.locator(".person-honza input[inputmode=numeric]");
   await weights.nth(0).fill("12,5");
   await reps.nth(0).fill("10");
   await expect
@@ -40,11 +40,13 @@ test("online zapojení fronty odesílá série obou profilů a obnoví offline z
     .toBeGreaterThan(0);
   await page
     .getByRole("button", {
-      name: "Zapsat sérii 1 cviku 1 a předat Davidovi",
+      name: "Honza: Zapsat sérii 1 cviku 1 a předat Davidovi",
       exact: true,
     })
     .click();
   await expect(page.locator(".editing-banner strong")).toHaveText("David");
+  weights = page.locator(".person-david input[inputmode=decimal]");
+  reps = page.locator(".person-david input[inputmode=numeric]");
   await weights.nth(0).fill("20");
   await reps.nth(0).fill("8");
   await expect
@@ -58,10 +60,12 @@ test("online zapojení fronty odesílá série obou profilů a obnoví offline z
     .toBe(true);
   await page
     .getByRole("button", {
-      name: "Zapsat sérii 1 cviku 1 a předat Honzovi",
+      name: "David: Zapsat sérii 1 cviku 1 a předat Honzovi",
       exact: true,
     })
     .click();
+  weights = page.locator(".person-honza input[inputmode=decimal]");
+  reps = page.locator(".person-honza input[inputmode=numeric]");
   await expect(weights.nth(0)).toHaveValue("12,5");
   await context.setOffline(true);
   await weights.nth(1).fill("15");
@@ -86,7 +90,9 @@ test("online zapojení fronty odesílá série obou profilů a obnoví offline z
       ),
     )
     .toEqual({});
-  await page.getByRole("button", { name: "D David" }).click();
+  weights = page.locator(".person-david input[inputmode=decimal]");
+  reps = page.locator(".person-david input[inputmode=numeric]");
+  await weights.first().focus();
   await expect(weights.nth(0)).toHaveValue("20");
   await page.evaluate(() => {
     (window as any).fitlogTestAccount = "david-account";
@@ -100,7 +106,9 @@ test("online zapojení fronty odesílá série obou profilů a obnoví offline z
   await page.getByRole("button", { name: "Obnovit online data" }).click();
   await page.getByRole("button", { name: "Zavřít", exact: true }).click();
   await expect(page.locator(".header-right .avatar")).toHaveText("D");
-  await page.getByRole("button", { name: "H Honza" }).click();
+  await page.locator(".person-honza input[inputmode=decimal]").first().focus();
+  weights = page.locator(".person-honza input[inputmode=decimal]");
+  reps = page.locator(".person-honza input[inputmode=numeric]");
   await expect(weights.nth(0)).toHaveValue("12,5");
   // Ani starší databáze bez Davidova profilu nesmí otevírat Nastavení.
   await page.evaluate(() => {
@@ -114,7 +122,9 @@ test("online zapojení fronty odesílá série obou profilů a obnoví offline z
     .click();
   await page.getByRole("button", { name: "Obnovit online data" }).click();
   await page.getByRole("button", { name: "Zavřít", exact: true }).click();
-  await page.getByRole("button", { name: "D David" }).click();
+  weights = page.locator(".person-david input[inputmode=decimal]");
+  reps = page.locator(".person-david input[inputmode=numeric]");
+  await weights.first().focus();
   await expect(page.locator(".editing-banner strong")).toHaveText("David");
   await expect(page.locator(".modal-backdrop")).toHaveCount(0);
   await weights.nth(1).fill("25");
@@ -129,7 +139,9 @@ test("online zapojení fronty odesílá série obou profilů a obnoví offline z
       ),
     )
     .toBe(true);
-  await page.getByRole("button", { name: "H Honza" }).click();
+  await page.locator(".person-honza input[inputmode=decimal]").first().focus();
+  weights = page.locator(".person-honza input[inputmode=decimal]");
+  reps = page.locator(".person-honza input[inputmode=numeric]");
   await expect(weights.nth(0)).toHaveValue("12,5");
   await expect(page.locator(".modal-backdrop")).toHaveCount(0);
   expect(errors).toEqual([]);

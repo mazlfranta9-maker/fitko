@@ -20,8 +20,8 @@ test("mobilní zápis, obnovení, dokončení a sdílený cyklus", async ({
     "Břicho",
   ]);
   expect(await page.locator("body").evaluate((e) => e.scrollWidth)).toBe(390);
-  const weights = page.locator(".set-row input[inputmode=decimal]");
-  const reps = page.locator(".set-row input[inputmode=numeric]");
+  let weights = page.locator(".person-honza input[inputmode=decimal]");
+  let reps = page.locator(".person-honza input[inputmode=numeric]");
   for (let i = 0; i < 24; i++) {
     await weights.nth(i).fill("12,5");
     await reps.nth(i).fill("10");
@@ -30,16 +30,18 @@ test("mobilní zápis, obnovení, dokončení a sdílený cyklus", async ({
   await expect(weights.first()).toHaveValue("12,5");
   page.on("dialog", (d) => d.accept());
   await page
-    .getByRole("button", { name: "Dokončit trénink", exact: true })
+    .getByRole("button", { name: "Dokončit trénink · Honza", exact: true })
     .click();
   await expect(page.locator(".day-display strong")).toContainText("01");
   await expect(page.locator(".editing-banner strong")).toHaveText("David");
+  weights = page.locator(".person-david input[inputmode=decimal]");
+  reps = page.locator(".person-david input[inputmode=numeric]");
   for (let i = 0; i < 24; i++) {
     await weights.nth(i).fill("15");
     await reps.nth(i).fill("9");
   }
   await page
-    .getByRole("button", { name: "Dokončit trénink", exact: true })
+    .getByRole("button", { name: "Dokončit trénink · David", exact: true })
     .click();
   await expect(page.locator(".day-display strong")).toContainText("02");
   await page.getByRole("button", { name: "Historie", exact: true }).click();
@@ -104,32 +106,35 @@ test("střídání po sériích zachová společný den, cvik a samostatné výs
   page,
 }) => {
   await page.goto("/");
-  const weights = page.locator("input[inputmode=decimal]"),
-    reps = page.locator("input[inputmode=numeric]");
+  let weights = page.locator(".person-honza input[inputmode=decimal]"),
+    reps = page.locator(".person-honza input[inputmode=numeric]");
   await weights.nth(0).fill("12,5");
   await reps.nth(0).fill("10");
   await page
     .getByRole("button", {
-      name: "Zapsat sérii 1 cviku 1 a předat Davidovi",
+      name: "Honza: Zapsat sérii 1 cviku 1 a předat Davidovi",
       exact: true,
     })
     .click();
   await expect(page.locator(".editing-banner strong")).toHaveText("David");
+  weights = page.locator(".person-david input[inputmode=decimal]");
+  reps = page.locator(".person-david input[inputmode=numeric]");
   await expect(weights.nth(0)).toHaveValue("");
   await weights.nth(0).fill("20");
   await reps.nth(0).fill("8");
   await page
     .getByRole("button", {
-      name: "Zapsat sérii 1 cviku 1 a předat Honzovi",
+      name: "David: Zapsat sérii 1 cviku 1 a předat Honzovi",
       exact: true,
     })
     .click();
   await expect(page.locator(".editing-banner strong")).toHaveText("Honza");
+  weights = page.locator(".person-honza input[inputmode=decimal]");
   await expect(weights.nth(0)).toHaveValue("12,5");
-  await expect(page.locator("#set-0-1")).toHaveClass(/active-set/);
+  await expect(page.locator("#set-Honza-0-1")).toHaveClass(/active-set/);
   await page.reload();
   await expect(weights.nth(0)).toHaveValue("12,5");
-  await page.getByRole("button", { name: "D David" }).click();
+  weights = page.locator(".person-david input[inputmode=decimal]");
   await expect(weights.nth(0)).toHaveValue("20");
   await expect(page.locator(".day-display strong")).toContainText("01");
 });

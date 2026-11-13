@@ -1757,3 +1757,143 @@ h4 {
   .calendar-schedule form { flex-direction: column; align-items: stretch; }
   .calendar-schedule form label, .calendar-schedule form button { width: 100%; }
 }
+
+/* Both athletes stay visible; colour always accompanies the written name. */
+.person-honza {
+  --person-color: #35dac0;
+  --person-bg: #173b36;
+}
+.person-david {
+  --person-color: #72baff;
+  --person-bg: #182f47;
+}
+.paired-sets {
+  padding: 0 20px 20px;
+}
+.paired-series {
+  padding-top: 14px;
+}
+.paired-series-title {
+  font-size: 13px;
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+.participant-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+.participant-set {
+  min-width: 0;
+  margin: 0;
+  padding: 10px 14px 12px;
+  border: 1px solid var(--person-color);
+  border-radius: 10px;
+  background: var(--person-bg);
+}
+.participant-title {
+  color: var(--person-color);
+  font-size: 18px;
+  font-weight: 700;
+  padding: 0 5px;
+}
+.participant-title span {
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 8px;
+}
+.participant-exercise {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.participant-set .set-row {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+.participant-set label {
+  display: block;
+  min-width: 0;
+  font-size: 9px;
+  color: #c5d4df;
+  letter-spacing: 0.4px;
+}
+.participant-set label small {
+  font-size: 8px;
+}
+.participant-set input {
+  display: block;
+  margin-top: 7px;
+  border-color: var(--person-color);
+}
+.participant-set .previous {
+  text-align: left;
+  font-size: 11px;
+  margin: 8px 0 12px;
+}
+.participant-set .pass-turn {
+  width: 100%;
+  color: var(--person-color);
+  background: var(--person-bg);
+  border-color: var(--person-color);
+  min-height: 42px;
+  margin: 0;
+}
+.participant-set.active-set {
+  background: var(--person-bg);
+  outline-color: var(--person-color);
+  outline-offset: 2px;
+  scroll-margin-top: 180px;
+}
+.participant-set.active-set input {
+  border-color: var(--person-color);
+}
+.participant-set input:focus-visible,
+.participant-set button:focus-visible {
+  outline: 2px solid var(--person-color);
+  outline-offset: 2px;
+}
+.editing-banner.person-david {
+  background: var(--person-bg);
+}
+.editing-banner strong {
+  color: var(--person-color, var(--accent));
+}
+.summary-card.person-david .finish {
+  background: var(--person-color);
+  color: #10171f;
+}
+.summary-card.person-david .progress-track > div {
+  background: var(--person-color);
+}
+.summary-card .participant-title {
+  padding: 0;
+  margin: 0 0 12px;
+}
+[data-theme="light"] .person-honza {
+  --person-color: #087665;
+  --person-bg: #e5f6f0;
+}
+[data-theme="light"] .person-david {
+  --person-color: #1c61a6;
+  --person-bg: #e8f2ff;
+}
+[data-theme="light"] .participant-set label {
+  color: #374659;
+}
+@media (max-width: 650px) {
+  .paired-sets {
+    padding: 0 12px 15px;
+  }
+  .participant-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .participant-set {
+    padding: 8px 12px 12px;
+  }
+  .participant-title {
+    font-size: 17px;
+  }
+}

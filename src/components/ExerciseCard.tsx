@@ -1,50 +1,50 @@
 import { Check, Dumbbell } from "lucide-react";
-import { type Exercise, type SetEntry, validSets } from "../domain";
+import {
+  type Exercise,
+  type Person,
+  type SetEntry,
+  validSets,
+} from "../domain";
 type Entry = { exerciseId: string; sets: SetEntry[] };
-type Props = {
-  person: import("../domain").Person;
+type Participant = {
+  person: Person;
+  entry: Entry;
   activeSet?: number;
+  previous?: Entry;
+  disabled: boolean;
+  completed?: boolean;
+  partnerDone?: boolean;
   onPass: (series: number) => void;
   onActivate?: (series: number) => void;
-  partnerDone?: boolean;
-  entry: Entry;
+  onChange: (entry: Entry) => void;
+};
+type Props = Participant & {
+  partner: Participant;
   index: number;
   muscle: string;
   exercises: Exercise[];
-  previous?: Entry;
-  disabled: boolean;
   selectionDisabled?: boolean;
-  onChange: (entry: Entry) => void;
   onAdd?: () => void;
 };
-export function ExerciseCard({
-  entry,
-  index,
-  person,
-  activeSet,
-  onPass,
-  onActivate,
-  partnerDone = false,
-  muscle,
-  exercises,
-  previous,
-  disabled,
-  selectionDisabled = false,
-  onChange,
-  onAdd,
-}: Props) {
-  const ex = exercises.find((e) => e.id === entry.exerciseId),
-    complete = validSets(entry.sets);
-  const changeSet = (i: number, field: keyof SetEntry, value: string) => {
-    if (!(field === "weight" ? /^\d*([.,]\d{0,2})?$/ : /^\d*$/).test(value))
-      return;
-    onChange({
-      ...entry,
-      sets: entry.sets.map((s, j) => (j === i ? { ...s, [field]: value } : s)),
-    });
-  };
+export function ExerciseCard(props: Props) {
+  const {
+    entry,
+    index,
+    muscle,
+    exercises,
+    disabled,
+    selectionDisabled,
+    onChange,
+    onAdd,
+    partner,
+  } = props;
+  const ex = exercises.find((e) => e.id === entry.exerciseId);
+  const complete =
+    validSets(entry.sets) && validSets(partner.entry?.sets ?? []);
   return (
-    <article className={"exercise-card " + (complete ? "complete" : "")}>
+    <article
+      className={`exercise-card paired-exercise ${complete ? "complete" : ""}`}
+    >
       <div className="exercise-head">
         <span className="exercise-order">
           {String(index + 1).padStart(2, "0")}
@@ -60,7 +60,7 @@ export function ExerciseCard({
           <span className="muscle-label">{muscle}</span>
           <select
             aria-label={`Cvik ${index + 1}`}
-            disabled={disabled || selectionDisabled || person === "David"}
+            disabled={disabled || selectionDisabled}
             value={entry.exerciseId}
             onChange={(e) => {
               if (e.target.value === "__add_exercise__") onAdd?.();
@@ -80,86 +80,125 @@ export function ExerciseCard({
                   {e.archived ? " (archiv)" : ""}
                 </option>
               ))}
-            {onAdd && person === "Honza" && (
-              <option value="__add_exercise__">+ Přidat cvik</option>
-            )}
+            {onAdd && <option value="__add_exercise__">+ Přidat cvik</option>}
           </select>
-          {person === "David" && <small>Cvik podle Honzy</small>}
+          <small>Společný cvik podle Honzy</small>
           {ex?.note && <small>{ex.note}</small>}
         </div>
-        <span className={"status-check " + (complete ? "checked" : "")}>
+        <span className={`status-check ${complete ? "checked" : ""}`}>
           {complete ? <Check size={17} /> : <span>3 série</span>}
         </span>
       </div>
-      <div className="set-table">
-        <div className="set-row table-labels">
-          <span>SÉRIE</span>
-          <span>
-            VÁHA <small>KG</small>
-          </span>
-          <span>OPAKOVÁNÍ</span>
-          <span>
-            MINULE <small>KG × OPAK.</small>
-          </span>
-        </div>
-        {entry.sets.map((s, i) => (
-          <div
-            className={"set-row " + (activeSet === i ? "active-set" : "")}
-            id={`set-${index}-${i}`}
-            key={i}
-          >
-            <span className="set-number">
-              {i + 1}
-              <small>PRACOVNÍ</small>
-            </span>
-            <input
-              aria-label={`${ex?.name} série ${i + 1} váha`}
-              inputMode="decimal"
-              placeholder="—"
-              value={s.weight}
-              disabled={disabled}
-              onFocus={() => onActivate?.(i)}
-              onChange={(e) => changeSet(i, "weight", e.target.value)}
-            />
-            <input
-              aria-label={`${ex?.name} série ${i + 1} opakování`}
-              inputMode="numeric"
-              placeholder="—"
-              value={s.reps}
-              disabled={disabled}
-              onFocus={() => onActivate?.(i)}
-              onChange={(e) => changeSet(i, "reps", e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  if (!e.repeat) onPass(i);
-                }
-              }}
-            />
-            <span className="previous">
-              {previous
-                ? `${previous.sets[i].weight} × ${previous.sets[i].reps}`
-                : "—"}
-            </span>
-            {!disabled && (
-              <button
-                className="pass-turn"
-                onClick={() => onPass(i)}
-                aria-label={
-                  partnerDone
-                    ? `Potvrdit sérii ${i + 1} cviku ${index + 1}`
-                    : `Zapsat sérii ${i + 1} cviku ${index + 1} a předat ${person === "Honza" ? "Davidovi" : "Honzovi"}`
-                }
-              >
-                ✓ Zapsat sérii {i + 1} ·{" "}
-                {partnerDone
-                  ? "Potvrdit"
-                  : `${person === "Honza" ? "David" : "Honza"} →`}
-              </button>
-            )}
+      <div className="paired-sets">
+        {entry.sets.map((_, series) => (
+          <div className="paired-series" key={series}>
+            <h3 className="paired-series-title">Série {series + 1}</h3>
+            <div className="participant-grid">
+              {[props, partner].map((participant) => (
+                <ParticipantSet
+                  key={participant.person}
+                  participant={participant}
+                  series={series}
+                  index={index}
+                  exercises={exercises}
+                />
+              ))}
+            </div>
           </div>
         ))}
       </div>
     </article>
+  );
+}
+function ParticipantSet({
+  participant: p,
+  series,
+  index,
+  exercises,
+}: {
+  participant: Participant;
+  series: number;
+  index: number;
+  exercises: Exercise[];
+}) {
+  const s = p.entry?.sets[series];
+  const ex = exercises.find((e) => e.id === p.entry?.exerciseId);
+  if (!s)
+    return <p role="alert">{p.person}: zápis této série není dostupný.</p>;
+  const change = (field: keyof SetEntry, value: string) => {
+    if (!(field === "weight" ? /^\d*([.,]\d{0,2})?$/ : /^\d*$/).test(value))
+      return;
+    p.onChange({
+      ...p.entry,
+      sets: p.entry.sets.map((set, i) =>
+        i === series ? { ...set, [field]: value } : set,
+      ),
+    });
+  };
+  return (
+    <fieldset
+      className={`participant-set person-${p.person.toLowerCase()} ${p.activeSet === series ? "active-set" : ""}`}
+      id={`set-${p.person}-${index}-${series}`}
+      data-person={p.person}
+      disabled={p.disabled}
+    >
+      <legend className="participant-title">
+        {p.person}{" "}
+        <span>
+          {p.completed ? "Dokončeno" : p.activeSet === series ? "Na řadě" : ""}
+        </span>
+      </legend>
+      {p.entry.exerciseId !== undefined && ex && (
+        <span className="participant-exercise">{ex.name}</span>
+      )}
+      <div className="set-row">
+        <label>
+          VÁHA <small>KG</small>
+          <input
+            aria-label={`${p.person} ${ex?.name} série ${series + 1} váha`}
+            inputMode="decimal"
+            placeholder="—"
+            value={s.weight}
+            onFocus={() => p.onActivate?.(series)}
+            onChange={(e) => change("weight", e.target.value)}
+          />
+        </label>
+        <label>
+          OPAKOVÁNÍ
+          <input
+            aria-label={`${p.person} ${ex?.name} série ${series + 1} opakování`}
+            inputMode="numeric"
+            placeholder="—"
+            value={s.reps}
+            onFocus={() => p.onActivate?.(series)}
+            onChange={(e) => change("reps", e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (!e.repeat) p.onPass(series);
+              }
+            }}
+          />
+        </label>
+      </div>
+      <div className="previous">
+        Minule:{" "}
+        {p.previous?.sets[series]
+          ? `${p.previous.sets[series].weight} kg × ${p.previous.sets[series].reps}`
+          : "—"}
+      </div>
+      {!p.disabled && (
+        <button
+          className="pass-turn"
+          onClick={() => p.onPass(series)}
+          aria-label={`${p.person}: Zapsat sérii ${series + 1} cviku ${index + 1}${p.partnerDone ? "" : ` a předat ${p.person === "Honza" ? "Davidovi" : "Honzovi"}`}`}
+        >
+          ✓ Zapsat sérii {series + 1} ·{" "}
+          {p.partnerDone
+            ? "Potvrdit"
+            : `${p.person === "Honza" ? "David" : "Honza"} →`}
+        </button>
+      )}
+    </fieldset>
   );
 }

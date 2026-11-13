@@ -7,8 +7,8 @@ test("z nabídky otevře knihovní formulář, předvyplní partii a vybere cvik
   await page.goto("/");
   const selects = page.locator(".exercise-name select");
   // Other exercises' results must not be touched by the new selection.
-  await page.locator("#set-1-0 input[inputmode=decimal]").fill("25");
-  await page.locator("#set-1-0 input[inputmode=numeric]").fill("8");
+  await page.locator("#set-Honza-1-0 input[inputmode=decimal]").fill("25");
+  await page.locator("#set-Honza-1-0 input[inputmode=numeric]").fill("8");
   await selects.nth(0).selectOption("__add_exercise__");
   const form = page.locator("form.modal");
   await expect(form.getByRole("heading")).toHaveText("Nový cvik");
@@ -22,17 +22,15 @@ test("z nabídky otevře knihovní formulář, předvyplní partii a vybere cvik
   await expect(selects.nth(0).locator("option:checked")).toHaveText(
     "Nový tlak z tréninku",
   );
-  await expect(page.locator("#set-1-0 input[inputmode=decimal]")).toHaveValue(
-    "25",
-  );
-  await page
-    .locator(".person-switch button")
-    .filter({ hasText: "David" })
-    .click();
-  await expect(selects.nth(0)).toBeDisabled();
-  await expect(selects.nth(0).locator("option:checked")).toHaveText(
+  await expect(
+    page.locator("#set-Honza-1-0 input[inputmode=decimal]"),
+  ).toHaveValue("25");
+  await expect(page.locator("#set-David-0-0 .participant-exercise")).toHaveText(
     "Nový tlak z tréninku",
   );
+  await expect(
+    page.locator("#set-David-0-0 input[inputmode=decimal]"),
+  ).toHaveValue("");
   await page.getByRole("button", { name: "Cviky", exact: true }).click();
   await expect(
     page.locator(".library-card").filter({ hasText: "Nový tlak z tréninku" }),
@@ -88,7 +86,7 @@ test("chyba uložení zachová formulář a umožní opakovat bez změny původn
   export const supabase=null;
   export function read(k,f){return JSON.parse(localStorage.getItem(k)||'null')??f;}
   export function persist(k,v){localStorage.setItem(k,JSON.stringify(v));}
-  export async function loadRemote(){} export async function savePatch(){} export async function saveRemote(){} export async function finishRemote(){}
+  export async function loadRemote(){} export async function savePatch(){} export async function loadNextTraining(){return null;} export async function saveNextTraining(){} export async function deleteExerciseRemote(){} export async function saveRemote(){} export async function finishRemote(){}
   export async function saveExercise(e){if(!window.allowExerciseSave)throw Error('Síť nedostupná');return e;}
  `,
     }),
@@ -134,7 +132,7 @@ test("nový biceps se vybere i v online tréninku, který má zatím jen prázdn
   export async function loadRemote(){return {profiles:[{id:'honza',auth_user_id:'honza',name:'Honza'},{id:'david',auth_user_id:null,name:'David'}],exercises:structuredClone(exercises),workouts:structuredClone(records),cycle:{day:1,round_id:'shared-placeholder'}};}
   export async function savePatch(job){records[0]=structuredClone(job.workout);return job.workout.id;}
   export async function saveExercise(e){exercises.push(e);return e;}
-  export async function saveRemote(){} export async function finishRemote(){}
+  export async function loadNextTraining(){return null;} export async function saveNextTraining(){} export async function deleteExerciseRemote(){} export async function saveRemote(){} export async function finishRemote(){}
  `,
     }),
   );

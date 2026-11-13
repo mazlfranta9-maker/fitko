@@ -46,7 +46,7 @@ test("PC a telefon: oddělená úložiště, oba profily, souběh a obnova star�
       export function persist(k,v){localStorage.setItem(k,JSON.stringify(v));}
       export const loadRemote=()=>window.fitlogRemote();
       export const savePatch=j=>{if(!navigator.onLine)throw Error('Offline');return window.fitlogPatch(j);};
-      export async function saveRemote(){} export async function finishRemote(){} export async function saveExercise(e){return e;}
+      export async function loadNextTraining(){return null;} export async function saveNextTraining(){} export async function deleteExerciseRemote(){} export async function saveRemote(){} export async function finishRemote(){} export async function saveExercise(e){return e;}
     `,
       }),
     );
@@ -58,8 +58,10 @@ test("PC a telefon: oddělená úložiště, oba profily, souběh a obnova star�
     expect(a.locator(".editing-banner strong")).toHaveText("Honza"),
     expect(b.locator(".editing-banner strong")).toHaveText("Honza"),
   ]);
-  const weights = (p: typeof a) => p.locator("input[inputmode=decimal]");
-  const reps = (p: typeof a) => p.locator("input[inputmode=numeric]");
+  const weights = (p: typeof a) =>
+    p.locator(".person-honza input[inputmode=decimal]");
+  const reps = (p: typeof a) =>
+    p.locator(".person-honza input[inputmode=numeric]");
   await Promise.all([
     weights(a).nth(0).fill("40"),
     weights(b).nth(1).fill("30"),
@@ -78,24 +80,28 @@ test("PC a telefon: oddělená úložiště, oba profily, souběh a obnova star�
     .toEqual({ weight: "45", reps: "10" });
   await a
     .getByRole("button", {
-      name: "Zapsat sérii 1 cviku 1 a předat Davidovi",
+      name: "Honza: Zapsat sérii 1 cviku 1 a předat Davidovi",
       exact: true,
     })
     .click();
-  await weights(a).nth(0).fill("20");
-  await reps(a).nth(0).fill("10");
+  await a.locator("#set-David-0-0 input[inputmode=decimal]").fill("20");
+  await a.locator("#set-David-0-0 input[inputmode=numeric]").fill("10");
   await expect
     .poll(() => records.find((w) => w.user === "David")?.entries[0].sets[0])
     .toEqual({ weight: "20", reps: "10" });
   await b.reload();
   await b
     .getByRole("button", {
-      name: "Zapsat sérii 1 cviku 1 a předat Davidovi",
+      name: "Honza: Zapsat sérii 1 cviku 1 a předat Davidovi",
       exact: true,
     })
     .click();
-  await expect(weights(b).nth(0)).toHaveValue("20");
-  await expect(reps(b).nth(0)).toHaveValue("10");
+  await expect(
+    b.locator("#set-David-0-0 input[inputmode=decimal]"),
+  ).toHaveValue("20");
+  await expect(
+    b.locator("#set-David-0-0 input[inputmode=numeric]"),
+  ).toHaveValue("10");
   // A legacy draft exists without an outbox, as in older application versions.
   await b.evaluate(() => {
     const drafts = JSON.parse(localStorage.getItem("fitlog-online-history")!);

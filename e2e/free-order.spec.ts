@@ -41,7 +41,7 @@ async function transport(page: Page) {
     export function persist(k,v){localStorage.setItem(k,JSON.stringify(v));}
     export const loadRemote=()=>window.freeOrderRead();
     export const savePatch=j=>window.freeOrderWrite(j);
-    export async function saveRemote(){} export async function finishRemote(){} export async function saveExercise(e){return e;}
+    export async function loadNextTraining(){return null;} export async function saveNextTraining(){} export async function deleteExerciseRemote(){} export async function saveRemote(){} export async function finishRemote(){} export async function saveExercise(e){return e;}
   `,
     }),
   );
@@ -49,64 +49,70 @@ async function transport(page: Page) {
   await expect(page.locator(".editing-banner strong")).toHaveText("Honza");
   return { records, reads: () => reads };
 }
-const row = (page: Page, exercise: number, series: number) =>
-  page.locator(`#set-${exercise}-${series}`);
+const row = (
+  page: Page,
+  person: "Honza" | "David",
+  exercise: number,
+  series: number,
+) => page.locator(`#set-${person}-${exercise}-${series}`);
 const write = async (
   page: Page,
+  person: "Honza" | "David",
   exercise: number,
   series: number,
   weight: string,
 ) => {
-  await row(page, exercise, series)
+  await row(page, person, exercise, series)
     .locator("input[inputmode=decimal]")
     .fill(weight);
-  await row(page, exercise, series)
+  await row(page, person, exercise, series)
     .locator("input[inputmode=numeric]")
     .fill("12");
 };
-const pass = async (page: Page, exercise: number, series: number) =>
-  row(page, exercise, series).locator("button.pass-turn").click();
-
-test("lýtka před rameny: střídání zůstane na zvoleném cviku a zachová oběma série", async ({
-  page,
-}) => {
-  const { records } = await transport(page);
-  for (let series = 0; series < 3; series++) {
-    await write(page, 7, series, String(50 + series));
-    await expect(row(page, 7, series)).toHaveClass(/active-set/);
-    await pass(page, 7, series);
-    await expect(page.locator(".editing-banner strong")).toHaveText("David");
-    await expect(row(page, 7, series)).toHaveClass(/active-set/);
-    await write(page, 7, series, String(30 + series));
-    await pass(page, 7, series);
-    await expect(page.locator(".editing-banner strong")).toHaveText(
-      series === 2 ? "David" : "Honza",
-    );
-    await expect(row(page, 7, series === 2 ? 2 : series + 1)).toHaveClass(
-      /active-set/,
-    );
-  }
-  await expect(
-    page.getByRole("status").filter({ hasText: "Oba máte tento cvik hotový" }),
-  ).toBeVisible();
-  await expect(row(page, 8, 0)).not.toHaveClass(/active-set/);
-  // Now the users deliberately choose shoulders, independent of the card order.
-  await page
-    .locator(".person-switch button")
-    .filter({ hasText: "Honza" })
-    .click();
-  await write(page, 3, 0, "20");
-  await expect(row(page, 3, 0)).toHaveClass(/active-set/);
-  await pass(page, 3, 0);
-  await expect(page.locator(".editing-banner strong")).toHaveText("David");
-  await write(page, 3, 0, "15");
-  await expect
+const pass = async (
+  page: Page,
+  person: "Honza" | "David",
+  exercise: number,
+  series: number,
+) => row(page, person, exercise, series).locator("button.pass-turn").click();
+const drained = async (page: Page) =>
+  expect
     .poll(() =>
       page.evaluate(() =>
         JSON.parse(localStorage.getItem("fitlog-online-outbox") || "{}"),
       ),
     )
     .toEqual({});
+
+test("lýtka před rameny: oba viditelní a střídání zůstane na zvoleném cviku", async ({
+  page,
+}) => {
+  const { records } = await transport(page);
+  await expect(page.locator(".person-switch")).toHaveCount(0);
+  for (let series = 0; series < 3; series++) {
+    await write(page, "Honza", 7, series, String(50 + series));
+    await pass(page, "Honza", 7, series);
+    await expect(row(page, "David", 7, series)).toHaveClass(/active-set/);
+    await expect(row(page, "Honza", 7, series)).toBeVisible();
+    await write(page, "David", 7, series, String(30 + series));
+    await pass(page, "David", 7, series);
+    await expect(
+      row(
+        page,
+        series === 2 ? "David" : "Honza",
+        7,
+        series === 2 ? 2 : series + 1,
+      ),
+    ).toHaveClass(/active-set/);
+  }
+  await expect(
+    page.getByRole("status").filter({ hasText: "Oba máte tento cvik hotový" }),
+  ).toBeVisible();
+  await expect(row(page, "Honza", 8, 0)).not.toHaveClass(/active-set/);
+  await write(page, "Honza", 3, 0, "20");
+  await pass(page, "Honza", 3, 0);
+  await write(page, "David", 3, 0, "15");
+  await drained(page);
   expect(
     records
       .find((w) => w.user === "Honza")!
@@ -118,29 +124,22 @@ test("lýtka před rameny: střídání zůstane na zvoleném cviku a zachová o
       .entries[7].sets.map((s) => s.weight),
   ).toEqual(["30", "31", "32"]);
   await page.reload();
-  await expect(page.locator(".editing-banner strong")).toHaveText("David");
-  await expect(row(page, 7, 0).locator("input[inputmode=decimal]")).toHaveValue(
-    "30",
-  );
-  await expect(row(page, 3, 0).locator("input[inputmode=decimal]")).toHaveValue(
-    "15",
-  );
-  await expect(row(page, 3, 0)).toHaveClass(/active-set/);
+  await expect(
+    row(page, "Honza", 7, 0).locator("input[inputmode=decimal]"),
+  ).toHaveValue("50");
+  await expect(
+    row(page, "David", 7, 0).locator("input[inputmode=decimal]"),
+  ).toHaveValue("30");
+  await expect(row(page, "David", 3, 0)).toHaveClass(/active-set/);
 });
 
-test("návrat z rozbalovací nabídky nebo do aplikace nevybere jiné kolo", async ({
+test("návrat do aplikace nezmění společné kolo ani viditelná pole", async ({
   page,
 }) => {
   const state = await transport(page);
-  await write(page, 7, 0, "50");
-  await pass(page, 7, 0);
-  await expect
-    .poll(() =>
-      page.evaluate(() =>
-        JSON.parse(localStorage.getItem("fitlog-online-outbox") || "{}"),
-      ),
-    )
-    .toEqual({});
+  await write(page, "Honza", 7, 0, "50");
+  await pass(page, "Honza", 7, 0);
+  await drained(page);
   state.records.push({
     id: "other",
     round: "newer-remote",
@@ -156,7 +155,6 @@ test("návrat z rozbalovací nabídky nebo do aplikace nevybere jiné kolo", asy
   const reads = state.reads();
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect.poll(() => state.reads()).toBeGreaterThan(reads);
-  // Wait for the new remote data to be applied, not just for the read to start.
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -166,94 +164,57 @@ test("návrat z rozbalovací nabídky nebo do aplikace nevybere jiné kolo", asy
       ),
     )
     .toBe(true);
-  await expect(page.locator(".editing-banner strong")).toHaveText("David");
-  await expect(row(page, 7, 0)).toHaveClass(/active-set/);
+  await expect(row(page, "David", 7, 0)).toHaveClass(/active-set/);
   expect(
     await page.evaluate(() =>
       JSON.parse(localStorage.getItem("fitlog-online-cycle")!),
     ),
   ).toEqual({ day: 3, round: "free-order" });
+  await expect(
+    row(page, "Honza", 7, 0).locator("input[inputmode=decimal]"),
+  ).toHaveValue("50");
 });
 
-test("Honza má zvolený cvik hotový: David dopíše vlastní série bez přeskakování", async ({
+test("Honza potvrdí všechny série a David pak dopíše vlastní bez přeskakování", async ({
   page,
 }) => {
   await transport(page);
   for (let series = 0; series < 3; series++) {
-    await write(page, 7, series, String(50 + series));
-    await pass(page, 7, series);
-    if (series < 2)
-      await page
-        .locator(".person-switch button")
-        .filter({ hasText: "Honza" })
-        .click();
+    await write(page, "Honza", 7, series, String(50 + series));
+    await pass(page, "Honza", 7, series);
   }
-  await page
-    .locator(".person-switch button")
-    .filter({ hasText: "David" })
-    .click();
   for (let series = 0; series < 3; series++) {
-    await write(page, 7, series, String(30 + series));
-    await pass(page, 7, series);
+    await write(page, "David", 7, series, String(30 + series));
+    await pass(page, "David", 7, series);
     await expect(page.locator(".editing-banner strong")).toHaveText("David");
-    await expect(row(page, 7, Math.min(series + 1, 2))).toHaveClass(
+    await expect(row(page, "David", 7, Math.min(series + 1, 2))).toHaveClass(
       /active-set/,
     );
   }
-  await expect
-    .poll(() =>
-      page.evaluate(() =>
-        JSON.parse(localStorage.getItem("fitlog-online-outbox") || "{}"),
-      ),
-    )
-    .toEqual({});
-  for (let series = 0; series < 3; series++)
-    await expect(
-      row(page, 7, series).locator("input[inputmode=decimal]"),
-    ).toHaveValue(String(30 + series));
+  await drained(page);
 });
 
-test("předvyplnění všech tří sérií oběma zachová běžné střídání i po reloadu", async ({
+test("všech šest předvyplněných sérií: potvrzení a obnovení nepřepíše ani neskryje partnera", async ({
   page,
 }) => {
   const { records } = await transport(page);
-  for (let series = 0; series < 3; series++)
-    await write(page, 7, series, String(50 + series));
-  await page
-    .locator(".person-switch button")
-    .filter({ hasText: "David" })
-    .click();
-  for (let series = 0; series < 3; series++)
-    await write(page, 7, series, String(30 + series));
-  await page
-    .locator(".person-switch button")
-    .filter({ hasText: "Honza" })
-    .click();
+  for (const person of ["Honza", "David"] as const)
+    for (let series = 0; series < 3; series++)
+      await write(
+        page,
+        person,
+        7,
+        series,
+        String((person === "Honza" ? 50 : 30) + series),
+      );
   for (let series = 0; series < 3; series++) {
-    await pass(page, 7, series);
-    await expect(page.locator(".editing-banner strong")).toHaveText("David");
-    await expect(row(page, 7, series)).toHaveClass(/active-set/);
-    await expect(
-      row(page, 7, series).locator("input[inputmode=decimal]"),
-    ).toHaveValue(String(30 + series));
-    await pass(page, 7, series);
-    await expect(page.locator(".editing-banner strong")).toHaveText(
-      series === 2 ? "David" : "Honza",
-    );
-    await expect(row(page, 7, series === 2 ? 2 : series + 1)).toHaveClass(
-      /active-set/,
-    );
+    await pass(page, "Honza", 7, series);
+    await expect(row(page, "David", 7, series)).toHaveClass(/active-set/);
+    await pass(page, "David", 7, series);
     if (series === 0) {
-      await expect
-        .poll(() =>
-          page.evaluate(() =>
-            JSON.parse(localStorage.getItem("fitlog-online-outbox") || "{}"),
-          ),
-        )
-        .toEqual({});
+      await drained(page);
       await page.reload();
-      await expect(page.locator(".editing-banner strong")).toHaveText("Honza");
-      await expect(row(page, 7, 1)).toHaveClass(/active-set/);
+      await expect(row(page, "Honza", 7, 1)).toHaveClass(/active-set/);
     }
   }
   await expect(
@@ -271,23 +232,23 @@ test("předvyplnění všech tří sérií oběma zachová běžné střídání
   ).toEqual(["30", "31", "32"]);
 });
 
-test("jen Honza předvyplněný: Enter dál střídá běžně a podržení nepotvrdí partnera", async ({
+test("Enter přidělí potvrzení správnému člověku, podržení nepotvrdí další sérii", async ({
   page,
 }) => {
   await transport(page);
   for (let series = 0; series < 3; series++)
-    await write(page, 7, series, String(50 + series));
-  await row(page, 7, 0).locator("input[inputmode=numeric]").press("Enter");
-  await expect(page.locator(".editing-banner strong")).toHaveText("David");
-  await write(page, 7, 0, "30");
-  await row(page, 7, 0)
+    await write(page, "Honza", 7, series, String(50 + series));
+  await row(page, "Honza", 7, 0)
+    .locator("input[inputmode=numeric]")
+    .press("Enter");
+  await expect(row(page, "David", 7, 0)).toHaveClass(/active-set/);
+  await write(page, "David", 7, 0, "30");
+  await row(page, "David", 7, 0)
     .locator("input[inputmode=numeric]")
     .dispatchEvent("keydown", { key: "Enter", repeat: true });
   await expect(page.locator(".editing-banner strong")).toHaveText("David");
-  await row(page, 7, 0).locator("input[inputmode=numeric]").press("Enter");
-  await expect(page.locator(".editing-banner strong")).toHaveText("Honza");
-  await expect(row(page, 7, 1)).toHaveClass(/active-set/);
-  await pass(page, 7, 1);
-  await expect(page.locator(".editing-banner strong")).toHaveText("David");
-  await expect(row(page, 7, 1)).toHaveClass(/active-set/);
+  await row(page, "David", 7, 0)
+    .locator("input[inputmode=numeric]")
+    .press("Enter");
+  await expect(row(page, "Honza", 7, 1)).toHaveClass(/active-set/);
 });
