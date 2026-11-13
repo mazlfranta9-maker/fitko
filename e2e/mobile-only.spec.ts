@@ -105,7 +105,7 @@ test("telefon sám: obnova prvního načtení, společné cviky, David první a 
       export function persist(k,v){localStorage.setItem(k,JSON.stringify(v));}
       export const loadRemote=()=>window.mobileLoad();
       export const savePatch=(job,plan)=>window.mobileSave({job,plan});
-      export async function saveRemote(){} export async function finishRemote(){} export async function saveExercise(e){return e;}
+      export async function loadNextTraining(){return null;} export async function saveNextTraining(){} export async function deleteExerciseRemote(){} export async function saveRemote(){} export async function finishRemote(){} export async function saveExercise(e){return e;}
     `,
       }),
     );
@@ -114,13 +114,9 @@ test("telefon sám: obnova prvního načtení, společné cviky, David první a 
     page.on("pageerror", (e) => errors.push(e.message));
     await page.goto("/");
     await expect(page.locator(".editing-banner strong")).toHaveText("Honza");
-    await page
-      .locator(".person-switch button")
-      .filter({ hasText: "David" })
-      .click();
-    await expect(page.getByLabel("Cvik 1", { exact: true })).toBeDisabled();
-    const weights = page.locator("input[inputmode=decimal]"),
-      reps = page.locator("input[inputmode=numeric]");
+    await expect(page.locator(".person-switch")).toHaveCount(0);
+    const weights = page.locator(".person-david input[inputmode=decimal]"),
+      reps = page.locator(".person-david input[inputmode=numeric]");
     await weights.nth(0).fill("20");
     await reps.nth(0).fill("10");
     const result = async () =>
@@ -138,10 +134,6 @@ test("telefon sám: obnova prvního načtení, společné cviky, David první a 
     expect(
       (await result()).find((r) => r.name === "Honza" && r.position === 0),
     ).toMatchObject({ weight: null, reps: null });
-    await page
-      .locator(".person-switch button")
-      .filter({ hasText: "Honza" })
-      .click();
     await page.getByLabel("Cvik 2", { exact: true }).selectOption("alternate");
     await expect
       .poll(async () =>
@@ -150,14 +142,12 @@ test("telefon sám: obnova prvního načtení, společné cviky, David první a 
           .map((r) => r.exercise_id),
       )
       .toEqual(["alternate", "alternate"]);
-    await page
-      .locator(".person-switch button")
-      .filter({ hasText: "David" })
-      .click();
     await expect(page.getByLabel("Cvik 2", { exact: true })).toHaveValue(
       "alternate",
     );
-    await expect(page.getByLabel("Cvik 2", { exact: true })).toBeDisabled();
+    await expect(
+      page.locator("#set-David-1-0 .participant-exercise"),
+    ).toHaveText("Jiný tlak");
     await phone.setOffline(true);
     await weights.nth(3).fill("25");
     await reps.nth(3).fill("8");

@@ -532,10 +532,10 @@ function App() {
     persist("fitlog-light", light);
   }, [light]);
   const editable = !supabase || auth;
-  const localOnly = !!supabase && !availablePeople.includes(person);
-  const current =
-    drafts.find((w) => w.user === person && w.round === cycle.round) ||
-    workouts.find((w) => w.user === person && w.round === cycle.round);
+  const localOnlyPeople = (["Honza", "David"] as Person[]).filter(
+    (p) => !availablePeople.includes(p),
+  );
+  const localOnly = !!supabase && localOnlyPeople.length > 0;
   const makeDraft = (): Workout => ({
     id: uid(),
     round: cycle.round,
@@ -548,63 +548,63 @@ function App() {
       sets: [0, 1, 2].map(() => ({ weight: "", reps: "" })),
     })),
   });
-  const originalWorkout = current
-    ? current.entries.length
-      ? current
-      : { ...current, entries: makeDraft().entries }
-    : makeDraft();
-  const arrangedWorkout = {
-    ...originalWorkout,
-    entries: arrangeEntries(
-      originalWorkout.day,
-      originalWorkout.entries,
-      exercises,
-    ),
+  const trainingWorkout = (p: Person): Workout => {
+    const stored =
+      drafts.find((w) => w.user === p && w.round === cycle.round) ||
+      workouts.find((w) => w.user === p && w.round === cycle.round);
+    const base = stored?.entries.length
+      ? stored
+      : {
+          ...(stored || makeDraft()),
+          user: p,
+          entries: makeDraft().entries,
+        };
+    return {
+      ...base,
+      entries: arrangeEntries(base.day, base.entries, exercises),
+    };
   };
-  const honzaSource = drafts.find(
-    (w) => w.user === "Honza" && w.round === cycle.round && w.entries.length,
-  ) ||
-    workouts.find(
-      (w) => w.user === "Honza" && w.round === cycle.round && w.entries.length,
-    ) || { ...makeDraft(), user: "Honza" as Person };
-  const shared =
-    person === "David"
-      ? followHonza(arrangedWorkout, honzaSource, exercises)
-      : { workout: arrangedWorkout, conflict: false };
-  const workout = shared.workout;
-  const confirmed = workouts.find(
-    (w) => w.user === person && w.round === workout.round,
-  );
-  const isConfirmed =
-    !!confirmed &&
-    workout.entries.length > 0 &&
-    workout.entries.every((e) => {
-      const saved = confirmed.entries.find(
-        (x) => x.exerciseId === e.exerciseId,
-      );
-      return e.sets.every((s, i) =>
-        (["weight", "reps"] as const).every((field) => {
-          const value = saved?.sets[i]?.[field];
-          return (
-            value !== undefined &&
-            (s[field] === ""
+  const honzaSource = trainingWorkout("Honza");
+  const shared = followHonza(trainingWorkout("David"), honzaSource, exercises);
+  const pairedWorkouts: Record<Person, Workout> = {
+    Honza: honzaSource,
+    David: shared.workout,
+  };
+  const workout = pairedWorkouts[person];
+  const isConfirmed = Object.values(pairedWorkouts).every((current) => {
+    const confirmed = workouts.find(
+      (w) => w.user === current.user && w.round === current.round,
+    );
+    return (
+      current.entries.every((entry) => {
+        const saved = confirmed?.entries.find(
+          (e) => e.exerciseId === entry.exerciseId,
+        );
+        return entry.sets.every((set, i) =>
+          (["weight", "reps"] as const).every((field) => {
+            const value = saved?.sets[i]?.[field];
+            if (value === undefined) return set[field] === "";
+            return set[field] === ""
               ? value === ""
               : value !== "" &&
-                Number(s[field].replace(",", ".")) === Number(value))
-          );
-        }),
-      );
-    }) &&
-    !queue
-      .current!.pending()
-      .some(
-        (j) => j.workout.user === person && j.workout.round === workout.round,
-      );
+                  Number(set[field].replace(",", ".")) === Number(value);
+          }),
+        );
+      }) &&
+      !queue
+        .current!.pending()
+        .some(
+          (job) =>
+            job.workout.user === current.user &&
+            job.workout.round === current.round,
+        )
+    );
+  });
   const visibleSyncStatus =
     syncStatus === "Uloženo online" && !isConfirmed
       ? "Místní zápis · zkontrolujte synchronizaci"
       : syncStatus;
-  const update = (w: Workout, before: Workout = workout) => {
+  const update = (w: Workout, before: Workout = pairedWorkouts[w.user]) => {
     if (!editable || w.completed || shared.conflict) return;
     const changes = changedSets(before, w);
     setDrafts((ds) => {
@@ -622,7 +622,8 @@ function App() {
     if (supabase) void queue.current!.flush();
     setPerson(p);
   };
-  const passTurn = (exercise: number, series: number) => {
+  const passTurn = (person: Person, exercise: number, series: number) => {
+    const workout = pairedWorkouts[person];
     if (!editable || workout.completed || shared.conflict) return;
     const entry = workout.entries[exercise],
       set = entry.sets[series];
@@ -646,42 +647,7 @@ function App() {
     setConfirmations(nextConfirmations);
     if (supabase) void queue.current!.flush();
     const other: Person = person === "Honza" ? "David" : "Honza";
-    let partner =
-      drafts.find((w) => w.user === other && w.round === cycle.round) ||
-      workouts.find((w) => w.user === other && w.round === cycle.round);
-    if (!partner || !partner.entries.length) {
-      const blank = {
-        ...makeDraft(),
-        id: partner?.id ?? uid(),
-        user: other,
-        entries: (other === "Honza" ? honzaSource : workout).entries.map(
-          (e) => ({
-            exerciseId: e.exerciseId,
-            sets: [0, 1, 2].map(() => ({ weight: "", reps: "" })),
-          }),
-        ),
-      };
-      setDrafts((ds) => [...ds, blank]);
-    }
-    if (
-      person === "Honza" &&
-      partner &&
-      partner.entries[exercise]?.exerciseId !== entry.exerciseId &&
-      partner.entries[exercise]?.sets.every(
-        (s) => s.weight === "" && s.reps === "",
-      )
-    ) {
-      partner = structuredClone(partner);
-      partner.entries[exercise] = {
-        exerciseId: entry.exerciseId,
-        sets: [0, 1, 2].map(() => ({ weight: "", reps: "" })),
-      };
-      const changed = partner;
-      setDrafts((ds) => [
-        ...ds.filter((d) => !(d.user === other && d.round === cycle.round)),
-        changed!,
-      ]);
-    }
+    const partner = pairedWorkouts[other];
     const turn = nextTurn(
       workout,
       partner,
@@ -701,11 +667,10 @@ function App() {
     switchPerson(turn.person);
     requestAnimationFrame(() =>
       document
-        .getElementById(`set-${turn.exercise}-${turn.series}`)
+        .getElementById(`set-${turn.person}-${turn.exercise}-${turn.series}`)
         ?.scrollIntoView({ block: "center", behavior: "smooth" }),
     );
   };
-  const done = workout.entries.filter((e) => validSets(e.sets)).length;
   const last = (id: string, day: number, user = person) =>
     workouts
       .filter(
@@ -713,13 +678,15 @@ function App() {
           w.user === user &&
           w.completed &&
           typeOf(w.day) === typeOf(day) &&
-          w.id !== workout.id &&
+          w.round !== cycle.round &&
           w.entries.some((e) => e.exerciseId === id),
       )
       .sort((a, b) => b.date.localeCompare(a.date))[0]
       ?.entries.find((e) => e.exerciseId === id);
-  async function save(finish = false) {
-    if (!editable) return;
+  async function save(finish = false, target = workout) {
+    const workout = target;
+    const person = target.user;
+    if (!editable || workout.completed || shared.conflict) return;
     if (
       finish &&
       (new Set(workout.entries.map((e) => e.exerciseId)).size !==
@@ -916,7 +883,6 @@ function App() {
             ),
         );
         if (
-          person === "Honza" &&
           cycle.round === latest.round &&
           !latest.completed &&
           !saved.archived &&
@@ -949,15 +915,11 @@ function App() {
     }
   }
   async function deleteExercise(e: Exercise) {
-    const reason = deletionBlockReason(
-      e,
-      exercisesRef.current,
-      [
-        ...snapshots.current.workouts,
-        ...snapshots.current.drafts,
-        ...queue.current!.pending().map((job) => job.workout),
-      ],
-    );
+    const reason = deletionBlockReason(e, exercisesRef.current, [
+      ...snapshots.current.workouts,
+      ...snapshots.current.drafts,
+      ...queue.current!.pending().map((job) => job.workout),
+    ]);
     if (reason) {
       notify(reason);
       return;
@@ -966,7 +928,8 @@ function App() {
       !window.confirm(
         `Opravdu trvale smazat cvik „${e.name}“? Tuto akci nelze vrátit.`,
       )
-    ) return;
+    )
+      return;
     setBusy(true);
     try {
       await deleteExerciseRemote(e.id);
@@ -1236,20 +1199,6 @@ function App() {
                         : "Sestav si knihovnu, která odpovídá tvému tréninku."}
               </p>
             </div>
-            {tab === "Trénink" && (
-              <div className="person-switch">
-                {(["Honza", "David"] as Person[]).map((p) => (
-                  <button
-                    className={person === p ? "selected" : ""}
-                    key={p}
-                    onClick={() => switchPerson(p)}
-                  >
-                    <span>{p[0]}</span>
-                    {p}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
           {tab === "Kalendář" && (
             <div className="training-calendar">
@@ -1296,7 +1245,7 @@ function App() {
             </div>
           )}
           {tab === "Trénink" && (
-            <div className="editing-banner">
+            <div className={`editing-banner person-${person.toLowerCase()}`}>
               Na řadě: <strong>{person}</strong>
               <b className="sync-status" role="status">
                 {localOnly
@@ -1370,9 +1319,9 @@ function App() {
                   </div>
                   {localOnly && (
                     <div className="demo-note">
-                      Zápis pro {person} se nyní ukládá v tomto telefonu.
-                      Jakmile bude připravený online profil, odešle se
-                      automaticky.
+                      Zápis pro {localOnlyPeople.join(" a ")} se nyní ukládá v
+                      tomto telefonu. Jakmile bude připravený online profil,
+                      odešle se automaticky.
                     </div>
                   )}
                   {shared.conflict && (
@@ -1382,97 +1331,105 @@ function App() {
                       dalšími zápisy.
                     </p>
                   )}
-                  {workout.entries.map((entry, index) => (
-                    <ExerciseCard
-                      key={index}
-                      entry={entry}
-                      index={index}
-                      person={person}
-                      activeSet={
-                        activeSet.exercise === index
-                          ? activeSet.series
-                          : undefined
-                      }
-                      onPass={(series) => passTurn(index, series)}
-                      onAdd={
-                        person === "Honza"
-                          ? () =>
-                              newExercise(plan(workout.day).slots[index], {
-                                workout: structuredClone(workout),
-                                position: index,
-                                exerciseId: entry.exerciseId,
-                              })
-                          : undefined
-                      }
-                      onActivate={(series) =>
-                        setActiveSet({ exercise: index, series })
-                      }
-                      partnerDone={exerciseConfirmed(
-                        drafts.find(
-                          (w) => w.round === workout.round && w.user !== person,
-                        ) ||
-                          workouts.find(
-                            (w) =>
-                              w.round === workout.round && w.user !== person,
+                  {honzaSource.entries.map((entry, index) => {
+                    const participant = (p: Person) => {
+                      const w = pairedWorkouts[p];
+                      const ownEntry = w.entries[index];
+                      return {
+                        person: p,
+                        entry: ownEntry,
+                        activeSet:
+                          person === p && activeSet.exercise === index
+                            ? activeSet.series
+                            : undefined,
+                        previous:
+                          ownEntry && last(ownEntry.exerciseId, cycle.day, p),
+                        disabled: !editable || w.completed || shared.conflict,
+                        completed: w.completed,
+                        partnerDone:
+                          pairedWorkouts[p === "Honza" ? "David" : "Honza"]
+                            .completed ||
+                          exerciseConfirmed(
+                            pairedWorkouts[p === "Honza" ? "David" : "Honza"],
+                            ownEntry?.exerciseId,
+                            confirmations,
                           ),
-                        entry.exerciseId,
-                        confirmations,
-                      )}
-                      muscle={plan(cycle.day).slots[index]}
-                      exercises={exercises}
-                      previous={last(entry.exerciseId, cycle.day)}
-                      disabled={
-                        !editable || workout.completed || shared.conflict
-                      }
-                      selectionDisabled={
-                        person === "David" ||
-                        workout.entries[index].sets.some(
-                          (s) => s.weight !== "" || s.reps !== "",
-                        ) ||
-                        [...drafts, ...workouts].some(
-                          (w) =>
-                            w.round === workout.round &&
-                            w.user === "David" &&
-                            w.entries.some(
-                              (e) =>
-                                e.exerciseId === entry.exerciseId &&
-                                e.sets.some(
-                                  (s) => s.weight !== "" || s.reps !== "",
-                                ),
-                            ),
-                        )
-                      }
-                      onChange={(entry) => {
-                        const w = structuredClone(workout);
-                        if (
-                          w.entries.some(
-                            (e, i) =>
-                              i !== index && e.exerciseId === entry.exerciseId,
+                        onPass: (series: number) => passTurn(p, index, series),
+                        onActivate: (series: number) => {
+                          setPerson(p);
+                          setActiveSet({ exercise: index, series });
+                        },
+                        onChange: (
+                          changedEntry: Workout["entries"][number],
+                        ) => {
+                          const changed = structuredClone(w);
+                          if (
+                            changed.entries.some(
+                              (e, i) =>
+                                i !== index &&
+                                e.exerciseId === changedEntry.exerciseId,
+                            )
+                          ) {
+                            notify(
+                              "Tento cvik už je v tréninku vybraný. Vyberte jiný.",
+                            );
+                            return;
+                          }
+                          if (
+                            p === "David" &&
+                            ownEntry.exerciseId !== changedEntry.exerciseId
                           )
-                        ) {
-                          notify(
-                            "Tento cvik už je v tréninku vybraný. Vyberte jiný.",
-                          );
-                          return;
+                            return;
+                          if (ownEntry.exerciseId !== changedEntry.exerciseId)
+                            changedEntry = {
+                              ...changedEntry,
+                              sets: [0, 1, 2].map(() => ({
+                                weight: "",
+                                reps: "",
+                              })),
+                            };
+                          changed.entries[index] = changedEntry;
+                          update(changed, w);
+                        },
+                      };
+                    };
+                    return (
+                      <ExerciseCard
+                        key={index}
+                        {...participant("Honza")}
+                        partner={participant("David")}
+                        index={index}
+                        muscle={plan(cycle.day).slots[index]}
+                        exercises={exercises}
+                        onAdd={() =>
+                          newExercise(plan(honzaSource.day).slots[index], {
+                            workout: structuredClone(honzaSource),
+                            position: index,
+                            exerciseId: entry.exerciseId,
+                          })
                         }
-                        if (
-                          person === "David" &&
-                          w.entries[index].exerciseId !== entry.exerciseId
-                        )
-                          return;
-                        if (w.entries[index].exerciseId !== entry.exerciseId)
-                          entry = {
-                            ...entry,
-                            sets: [0, 1, 2].map(() => ({
-                              weight: "",
-                              reps: "",
-                            })),
-                          };
-                        w.entries[index] = entry;
-                        update(w);
-                      }}
-                    />
-                  ))}
+                        selectionDisabled={
+                          shared.conflict ||
+                          pairedWorkouts.David.completed ||
+                          entry.sets.some(
+                            (s) => s.weight !== "" || s.reps !== "",
+                          ) ||
+                          [...drafts, ...workouts].some(
+                            (w) =>
+                              w.round === honzaSource.round &&
+                              w.user === "David" &&
+                              w.entries.some(
+                                (e) =>
+                                  e.exerciseId === entry.exerciseId &&
+                                  e.sets.some(
+                                    (s) => s.weight !== "" || s.reps !== "",
+                                  ),
+                              ),
+                          )
+                        }
+                      />
+                    );
+                  })}
                   <div className="save-bar">
                     <span>
                       <Cloud size={16} />{" "}
@@ -1489,66 +1446,84 @@ function App() {
                   </div>
                 </section>
                 <div className="right-column">
-                  <section className="summary-card">
-                    <span className="eyebrow">DNEŠNÍ PŘEHLED</span>
-                    <div className="summary-number">
-                      {done}
-                      <span>/ {workout.entries.length}</span>
-                    </div>
-                    <p>dokončených cviků</p>
-                    <div className="progress-track">
-                      <div
-                        style={{
-                          width: `${(done / workout.entries.length) * 100}%`,
-                        }}
-                      />
-                    </div>
-                    <div className="summary-line">
-                      <span>Zapsané série</span>
-                      <b>
-                        {workout.entries.reduce(
-                          (n, e) =>
-                            n +
-                            e.sets.filter(
-                              (s) => s.weight !== "" && s.reps !== "",
-                            ).length,
-                          0,
-                        )}{" "}
-                        / {workout.entries.length * 3}
-                      </b>
-                    </div>
-                    <div className="summary-line">
-                      <span>Celkový objem</span>
-                      <b>
-                        {fmt(
-                          workout.entries.reduce(
-                            (n, e) => n + volume(e.sets),
-                            0,
-                          ),
-                        )}{" "}
-                        kg
-                      </b>
-                    </div>
-                    <button
-                      className="finish"
-                      disabled={
-                        busy || !editable || done !== workout.entries.length
-                      }
-                      onClick={() => {
-                        if (
-                          confirm(
-                            "Dokončit trénink a posunout společný cyklus?",
-                          )
-                        )
-                          save(true);
-                      }}
-                    >
-                      <Check size={18} /> Dokončit trénink
-                    </button>
-                    <small>
-                      Po dokončení přejdeme na den {nextDay(cycle.day)}.
-                    </small>
-                  </section>
+                  {(["Honza", "David"] as Person[]).map((p) => {
+                    const w = pairedWorkouts[p];
+                    const done = w.entries.filter((e) =>
+                      validSets(e.sets),
+                    ).length;
+                    return (
+                      <section
+                        className={`summary-card person-${p.toLowerCase()}`}
+                        key={p}
+                        aria-label={`Přehled ${p}`}
+                      >
+                        <h3 className="participant-title">{p}</h3>
+                        <span className="eyebrow">DNEŠNÍ PŘEHLED</span>
+                        <div className="summary-number">
+                          {done}
+                          <span>/ {w.entries.length}</span>
+                        </div>
+                        <p>vyplněných cviků</p>
+                        <div className="progress-track">
+                          <div
+                            style={{
+                              width: `${w.entries.length ? (done / w.entries.length) * 100 : 0}%`,
+                            }}
+                          />
+                        </div>
+                        <div className="summary-line">
+                          <span>Zapsané série</span>
+                          <b>
+                            {w.entries.reduce(
+                              (n, e) =>
+                                n +
+                                e.sets.filter(
+                                  (s) => s.weight !== "" && s.reps !== "",
+                                ).length,
+                              0,
+                            )}{" "}
+                            / {w.entries.length * 3}
+                          </b>
+                        </div>
+                        <div className="summary-line">
+                          <span>Celkový objem</span>
+                          <b>
+                            {fmt(
+                              w.entries.reduce((n, e) => n + volume(e.sets), 0),
+                            )}{" "}
+                            kg
+                          </b>
+                        </div>
+                        <button
+                          className="finish"
+                          disabled={
+                            busy ||
+                            !editable ||
+                            w.completed ||
+                            !w.entries.length ||
+                            done !== w.entries.length ||
+                            shared.conflict
+                          }
+                          onClick={() => {
+                            if (
+                              confirm(
+                                `Dokončit trénink pro ${p} a posunout společný cyklus?`,
+                              )
+                            )
+                              void save(true, w);
+                          }}
+                        >
+                          <Check size={18} />{" "}
+                          {w.completed
+                            ? `${p} · dokončeno`
+                            : `Dokončit trénink · ${p}`}
+                        </button>
+                        <small>
+                          Váhy a opakování se ukládají každému zvlášť.
+                        </small>
+                      </section>
+                    );
+                  })}
                   <section className="tip-card">
                     <span className="tip-icon">
                       <TrendingUp size={22} />
@@ -1754,7 +1729,11 @@ function App() {
                         setEditing(e);
                       }}
                     >
-                      <div className={"library-image" + (e.photo ? " has-photo" : "")}>
+                      <div
+                        className={
+                          "library-image" + (e.photo ? " has-photo" : "")
+                        }
+                      >
                         {e.photo ? (
                           <img src={e.photo} alt={e.name} />
                         ) : (
@@ -1762,7 +1741,9 @@ function App() {
                         )}
                         <span>{e.muscle}</span>
                         {e.photo && (
-                          <strong className="library-photo-title">{e.name}</strong>
+                          <strong className="library-photo-title">
+                            {e.name}
+                          </strong>
                         )}
                       </div>
                       <div>
@@ -2053,8 +2034,8 @@ function App() {
                 : "Demo: oba profily můžeš upravovat."}
             </p>
             <p>
-              Verze synchronizace: 2026.10.25 · předvyplnění a volné pořadí. Kolo:{" "}
-              {cycle.round}
+              Verze synchronizace: 2026.11.13 · společný zápis Honzy a Davida.
+              Kolo: {cycle.round}
               <br />
               {online ? "Telefon je online." : "Telefon je offline."}{" "}
               {drafts.length} lokálně rozpracovaných tréninků.

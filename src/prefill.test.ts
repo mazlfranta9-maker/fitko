@@ -106,3 +106,14 @@ it("vymazaná hodnota není hotová ani se starým potvrzením", () => {
     series: 0,
   });
 });
+
+it("dokončený trénink partnera se při předání znovu neotevírá", () => {
+  const honza = workout("Honza");
+  const david = workout("David");
+  honza.completed = true;
+  expect(
+    nextTurn(david, honza, 0, 0, {
+      [confirmationKey(david, david.entries[0].exerciseId, 0)]: true,
+    }),
+  ).toEqual({ person: "David", exercise: 0, series: 1 });
+});

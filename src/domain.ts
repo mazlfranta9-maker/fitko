@@ -179,7 +179,8 @@ export function seriesConfirmed(
     !!workout &&
     !!set &&
     validSets([set, set, set]) &&
-    confirmations[confirmationKey(workout, exerciseId, series)] === true
+    (workout.completed ||
+      confirmations[confirmationKey(workout, exerciseId, series)] === true)
   );
 }
 export function exerciseConfirmed(
